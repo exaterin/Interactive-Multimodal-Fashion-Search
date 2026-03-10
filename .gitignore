@@ -1,4 +1,7 @@
 Related work
 .env
 data/images
+data/embeddings
 fashionenv
+*.pyc
+__pycache__/

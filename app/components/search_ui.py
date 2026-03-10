@@ -59,7 +59,7 @@ def _render_results(results, catalog) -> None:
 
 
 def render_search_tab() -> None:
-    st.subheader("Search")
+    st.title("Search")
 
     catalog = load_catalog()
 
