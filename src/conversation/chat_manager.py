@@ -1,4 +1,5 @@
-from typing import Dict, List
+import re
+from typing import Dict, List, Optional, Tuple
 
 from src.conversation.llm_client import LLMClient
 
@@ -40,6 +41,14 @@ class ChatManager:
             {"role": "system", "content": self.system_prompt},
             *trimmed_history,
         ]
+
+    def parse_reply(self, reply: str) -> Tuple[str, Optional[str]]:
+        match = re.search(r"^SEARCH_QUERY:\s*(.+)$", reply, re.MULTILINE)
+        if match:
+            search_query = match.group(1).strip()
+            display_text = reply[: match.start()].rstrip()
+            return display_text, search_query
+        return reply, None
 
     def generate_reply(self, history: List[Message]) -> str:
         """

@@ -1,7 +1,11 @@
 Related work
 .env
-data/images
-data/embeddings
+data
 fashionenv
-*.pyc
+experiments/outputs
+
+# Python cache
 __pycache__/
+*.pyc
+*.pyo
+*.pyd

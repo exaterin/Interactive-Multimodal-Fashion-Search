@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Dict, List
 
-from src.data.catalog import Catalog
+from src.data.deepfashion.catalog import Catalog
 
 
 def matches_filters(

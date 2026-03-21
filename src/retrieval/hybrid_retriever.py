@@ -4,9 +4,9 @@ from typing import Dict, List, Optional
 
 import numpy as np
 
-from src.data.catalog import Catalog
-from src.models.fashion_clip_encoder import FashionCLIPEncoder
+from src.data.deepfashion.catalog import Catalog
 from src.retrieval.filtering import matches_filters
+from src.models.fashion_clip_encoder import FashionCLIPEncoder
 
 
 def search_hybrid(
