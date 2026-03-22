@@ -21,8 +21,9 @@ def _render_df_filters(catalog):
 def _render_fp_filters(catalog):
     return {
         "category": st.multiselect("Category", options=catalog.available_values["category"], default=[]),
-        "pattern": st.multiselect("Pattern", options=catalog.available_values.get("pattern", []), default=[]),
-        "shape": st.multiselect("Shape", options=catalog.available_values.get("shape", []), default=[]),
+        "color":    st.multiselect("Color",    options=catalog.available_values.get("color", []),    default=[]),
+        "pattern":  st.multiselect("Pattern",  options=catalog.available_values.get("pattern", []),  default=[]),
+        "shape":    st.multiselect("Shape",    options=catalog.available_values.get("shape", []),    default=[]),
         "material": st.multiselect("Material", options=catalog.available_values.get("material", []), default=[]),
         "finishing": st.multiselect("Finishing", options=catalog.available_values.get("finishing", []), default=[]),
     }

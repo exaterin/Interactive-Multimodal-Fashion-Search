@@ -21,9 +21,6 @@ if str(PROJECT_ROOT) not in sys.path:
 from src.data.deepfashion.loaders import load_catalog
 from src.models.fashion_clip_encoder import FashionCLIPEncoder
 
-
-
-
 OUTPUT_DIR = PROJECT_ROOT / "outputs" / "grounded"
 
 QUERY = "black sunglasses"

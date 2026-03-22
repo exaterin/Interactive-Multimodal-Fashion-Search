@@ -68,6 +68,12 @@ def matches_filters_fp(
         if not set(selected_filters["finishing"]).issubset(item_finishings):
             return False
 
+    if selected_filters.get("color"):
+        item_colors = set(catalog.color_annotations.get(item_id, []))
+        # At least one of the selected colors must be present
+        if not item_colors.intersection(selected_filters["color"]):
+            return False
+
     return True
 
 # Internal ranking helper
