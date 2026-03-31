@@ -2,6 +2,7 @@ Related work
 .env
 data
 fashionenv
+outputs
 experiments/outputs
 
 # Python cache

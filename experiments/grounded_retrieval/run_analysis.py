@@ -23,7 +23,7 @@ from src.models.fashion_clip_encoder import FashionCLIPEncoder
 
 OUTPUT_DIR = PROJECT_ROOT / "outputs" / "grounded"
 
-QUERY = "black sunglasses"
+QUERY = "floral shirt"
 TOP_K = 1000
 
 MAX_CLUSTERS = 8
