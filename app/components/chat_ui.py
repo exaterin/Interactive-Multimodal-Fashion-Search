@@ -1,45 +1,56 @@
 from __future__ import annotations
 
-from typing import List
+from typing import List, Optional
 
 import streamlit as st
 from PIL import Image
 
-from src.conversation.chat_manager import ChatManager
+from src.conversation.llm_client import LLMClient
+from src.search.search_state import SearchState
+from src.search.grounding_analyzer import GroundingContext, analyze_results
+from src.search.response_generator import generate_grounded_response
 
 
-# Session-state helpers
-def init_chat_state() -> None:
-    if "chat_messages" not in st.session_state:
-        st.session_state.chat_messages = []
-    # Last query extracted from LLM reply (or last user message as fallback)
-    if "chat_last_query" not in st.session_state:
-        st.session_state.chat_last_query = ""
-    # Persisted search results: {"results": [...], "dataset": str}
-    if "chat_search_panel" not in st.session_state:
-        st.session_state.chat_search_panel = None
+# Session state keys
+_MSG_KEY = "cb_messages"
+_STATE_KEY = "cb_search_state"
+_RESULTS_KEY = "cb_results"
+_CATALOG_KEY = "cb_catalog"
+_SUGGESTIONS_KEY = "cb_suggestions"
+_PENDING_KEY = "cb_pending_input"
+
+def _init_state() -> None:
+    defaults = {
+        _MSG_KEY: [],
+        _STATE_KEY: SearchState(),
+        _RESULTS_KEY: None,
+        _CATALOG_KEY: None,
+        _SUGGESTIONS_KEY: [],
+        _PENDING_KEY: None,
+    }
+    for key, value in defaults.items():
+        if key not in st.session_state:
+            st.session_state[key] = value
 
 
-def clear_chat() -> None:
-    st.session_state.chat_messages = []
-    st.session_state.chat_last_query = ""
-    st.session_state.chat_search_panel = None
+def _clear_all() -> None:
+    st.session_state[_MSG_KEY] = []
+    st.session_state[_STATE_KEY] = SearchState()
+    st.session_state[_RESULTS_KEY] = None
+    st.session_state[_CATALOG_KEY] = None
+    st.session_state[_SUGGESTIONS_KEY] = []
+    st.session_state[_PENDING_KEY] = None
 
-
-
-# Catalog loaders
-
+@st.cache_resource
 def _load_fashionpedia_catalog():
     from src.data.fashionpedia.loaders import load_fashionpedia_catalog
     return load_fashionpedia_catalog()
 
 
-def _load_deepfashion_catalog():
-    from src.data.deepfashion.loaders import load_catalog
-    return load_catalog()
-
-
-# Result renderers
+@st.cache_resource
+def _load_encoder():
+    from src.models.fashion_clip_encoder import build_fashion_clip_encoder
+    return build_fashion_clip_encoder()
 
 def _crop_bbox(image_path, bbox) -> Image.Image:
     img = Image.open(str(image_path)).convert("RGB")
@@ -47,9 +58,119 @@ def _crop_bbox(image_path, bbox) -> Image.Image:
     return img.crop((x, y, x + w, y + h))
 
 
-def _render_fashionpedia_results(results: List[dict], catalog) -> None:
-    st.markdown(f"*{len(results)} garments from **Fashionpedia**:*")
-    cols_per_row = 4
+# Retrieval + grounding + response
+def _run_pipeline(
+    user_message: str,
+    llm_client: LLMClient,
+    top_k: int = 12,
+) -> tuple[str, List[str]]:
+    """
+    Run the full pipeline for one user turn:
+      1. Build retrieval query from current search state
+      2. Retrieve top-K items from Fashionpedia
+      3. Analyze retrieved results (grounding)
+      4. Generate grounded LLM response + suggestions
+      5. Update session state (results, search state, suggestions)
+
+    Returns (response_text, suggestions).
+    """
+    search_state: SearchState = st.session_state[_STATE_KEY]
+
+    query = search_state.current_query if search_state.current_query else user_message
+
+    # Retrieval
+    try:
+        catalog = _load_fashionpedia_catalog()
+        encoder = _load_encoder()
+    except FileNotFoundError as exc:
+        return (
+            f"Could not load the catalog. Make sure embeddings are generated: `{exc}`",
+            [],
+        )
+
+    from src.retrieval.fashionpedia_retriever import search_clip_fp
+
+    results = search_clip_fp(
+        catalog=catalog,
+        encoder=encoder,
+        query_text=query,
+        top_k=top_k,
+    )
+
+    st.session_state[_RESULTS_KEY] = {"results": results, "catalog": catalog}
+
+    # Grounding analysis
+    grounding: GroundingContext = analyze_results(results, catalog)
+
+    # LLM response 
+    response, suggestions, updated_query, llm_data = generate_grounded_response(
+        user_message=user_message,
+        search_state=search_state,
+        grounding_context=grounding,
+        llm_client=llm_client,
+    )
+
+    # Update search state 
+    if not search_state.original_query:
+        search_state.original_query = user_message
+    search_state.current_query = updated_query or query
+    search_state.last_suggestions = suggestions
+    search_state.update_from_llm(llm_data)
+
+    # If the LLM signalled a reset, wipe history and re-init
+    if llm_data.get("intent") == "reset":
+        _clear_all()
+        return "Alright, let's start fresh! What are you looking for?", []
+
+    st.session_state[_STATE_KEY] = search_state
+    st.session_state[_SUGGESTIONS_KEY] = suggestions
+
+    # Re-run retrieval with the refined query if it changed meaningfully
+    if updated_query and updated_query != query:
+        results = search_clip_fp(
+            catalog=catalog,
+            encoder=encoder,
+            query_text=updated_query,
+            top_k=top_k,
+        )
+        st.session_state[_RESULTS_KEY] = {"results": results, "catalog": catalog}
+
+    return response, suggestions
+
+
+# Result rendering (right panel)
+
+def _render_results_panel() -> None:
+    search_state: SearchState = st.session_state[_STATE_KEY]
+    results_data = st.session_state[_RESULTS_KEY]
+
+    # Active query summary
+    if search_state.current_query:
+        st.caption(f"**Query:** {search_state.current_query}")
+        constraint_parts = []
+        if search_state.positive_constraints:
+            constraint_parts.append("✓ " + ", ".join(search_state.positive_constraints))
+        if search_state.negative_constraints:
+            constraint_parts.append("✗ " + ", ".join(search_state.negative_constraints))
+        if search_state.style_tags:
+            constraint_parts.append("Style: " + ", ".join(search_state.style_tags))
+        if constraint_parts:
+            st.caption(" · ".join(constraint_parts))
+
+    if not results_data:
+        st.info("Results will appear here once you start a conversation.")
+        return
+
+    catalog = results_data["catalog"]
+    results: List[dict] = results_data["results"]
+
+    if not results:
+        st.warning("No items found for this query.")
+        return
+
+    st.markdown(f"*{len(results)} items retrieved*")
+
+    cols_per_row = 3
     for start in range(0, len(results), cols_per_row):
         cols = st.columns(cols_per_row)
         for col, item in zip(cols, results[start : start + cols_per_row]):
@@ -67,145 +188,83 @@ def _render_fashionpedia_results(results: List[dict], catalog) -> None:
                 cat = catalog.category_annotations.get(item_id, "")
                 if cat:
                     st.caption(cat)
-                if item.get("score") is not None:
-                    st.caption(f"{item['score']:.3f}")
+                score = item.get("score")
+                if score is not None:
+                    st.caption(f"{score:.3f}")
 
 
-def _render_deepfashion_results(results: List[dict], catalog) -> None:
-    st.markdown(f"*{len(results)} items from **DeepFashion**:*")
-    cols_per_row = 4
-    for start in range(0, len(results), cols_per_row):
-        cols = st.columns(cols_per_row)
-        for col, item in zip(cols, results[start : start + cols_per_row]):
-            image_id = item["image_id"]
-            image_path = catalog.image_paths.get(image_id)
-            with col:
-                if image_path and image_path.exists():
-                    st.image(str(image_path), use_container_width=True)
-                else:
-                    st.warning("Not found")
-                if item.get("score") is not None:
-                    st.caption(f"{item['score']:.3f}")
+# Chat panel
 
-
-
-# Search runner
-
-def _run_fashionpedia_search(query: str, top_k: int = 8) -> dict:
-    catalog = _load_fashionpedia_catalog()
-    from src.models.fashion_clip_encoder import build_fashion_clip_encoder
-    from src.retrieval.fashionpedia_retriever import search_clip_fp
-
-    encoder = build_fashion_clip_encoder()
-    results = search_clip_fp(catalog=catalog, encoder=encoder, query_text=query, top_k=top_k)
-    return {"results": results, "dataset": "Fashionpedia", "catalog": catalog}
-
-
-def _run_deepfashion_search(query: str, top_k: int = 8) -> dict:
-    catalog = _load_deepfashion_catalog()
-    from src.models.fashion_clip_encoder import build_fashion_clip_encoder
-    from src.retrieval.clip_retriever import search_clip
-
-    encoder = build_fashion_clip_encoder()
-    results = search_clip(catalog=catalog, encoder=encoder, query_text=query, top_k=top_k)
-    return {"results": results, "dataset": "DeepFashion", "catalog": catalog}
-
-
-# Main render function
-
-def render_chat_tab(chat_manager: ChatManager) -> None:
-    init_chat_state()
-
-    st.title("Chatbot")
-
-    if st.button("Clear chat"):
-        clear_chat()
+def _render_chat_panel(llm_client: LLMClient) -> None:
+    # Top controls 
+    if st.button("Start over", key="cb_clear_btn", type="secondary"):
+        _clear_all()
         st.rerun()
 
-    # Chat history
-    chat_container = st.container()
+    # --- Scrollable chat history ---
+    chat_container = st.container(height=520, border=False)
     with chat_container:
-        for message in st.session_state.chat_messages:
-            with st.chat_message(message["role"]):
-                st.markdown(message["content"])
+        for msg in st.session_state[_MSG_KEY]:
+            with st.chat_message(msg["role"]):
+                st.markdown(msg["content"])
 
-    # Chat input
-    user_input = st.chat_input("Write a message...")
+    # --- Suggestion buttons (shown between history and input) ---
+    suggestions: List[str] = st.session_state[_SUGGESTIONS_KEY]
+    if suggestions:
+        btn_cols = st.columns(min(len(suggestions), 2))
+        for i, sug in enumerate(suggestions):
+            with btn_cols[i % 2]:
+                if st.button(
+                    sug,
+                    key=f"cb_sug_{i}",
+                    use_container_width=True,
+                    type="secondary",
+                ):
+                    st.session_state[_PENDING_KEY] = sug
+                    st.rerun()
 
-    if user_input:
-        user_message = {"role": "user", "content": user_input}
-        st.session_state.chat_messages.append(user_message)
+    # --- Chat input ---
+    user_input: Optional[str] = st.chat_input("Describe what you're looking for…")
 
-        with chat_container:
-            with st.chat_message("user"):
-                st.markdown(user_input)
+    # Resolve effective input (typed or from suggestion button)
+    pending: Optional[str] = st.session_state.get(_PENDING_KEY)
+    effective_input: Optional[str] = pending or user_input
+    if pending:
+        st.session_state[_PENDING_KEY] = None
 
-            with st.chat_message("assistant"):
-                with st.spinner("Thinking..."):
-                    try:
-                        raw_reply = chat_manager.generate_reply(
-                            st.session_state.chat_messages
-                        )
-                    except Exception as exc:
-                        raw_reply = f"Error: {exc}"
+    if not effective_input:
+        return
 
-                display_text, search_query = chat_manager.parse_reply(raw_reply)
-                st.markdown(display_text)
+    # Append and immediately render user message
+    st.session_state[_MSG_KEY].append({"role": "user", "content": effective_input})
+    with chat_container:
+        with st.chat_message("user"):
+            st.markdown(effective_input)
 
-        st.session_state.chat_messages.append(
-            {"role": "assistant", "content": display_text}
-        )
-        # Store the best available query for the search buttons
-        st.session_state.chat_last_query = search_query or user_input
+    # Run the retrieval + grounding + LLM pipeline
+    with st.spinner("Searching and analyzing…"):
+        response_text, _ = _run_pipeline(effective_input, llm_client)
 
-    # Search buttons
-    st.divider()
+    # Append and render assistant message
+    st.session_state[_MSG_KEY].append({"role": "assistant", "content": response_text})
+    with chat_container:
+        with st.chat_message("assistant"):
+            st.markdown(response_text)
 
-    query = st.session_state.chat_last_query
-    if query:
-        st.markdown(f"**Search query:** `{query}`")
 
-    col_fp, col_df = st.columns(2)
+# ---------------------------------------------------------------------------
+# Main entry point (called from streamlit_app.py)
+# ---------------------------------------------------------------------------
 
-    with col_fp:
-        if st.button("Search in Fashionpedia", use_container_width=True, type="primary"):
-            if not query:
-                st.warning("Say what you are looking for in the chat first.")
-            else:
-                with st.spinner(f'Searching Fashionpedia for "{query}"…'):
-                    try:
-                        panel = _run_fashionpedia_search(query)
-                        st.session_state.chat_search_panel = panel
-                    except FileNotFoundError:
-                        st.error(
-                            "Fashionpedia embeddings not found. "
-                            "Run `python src/models/generate_fashionpedia_embeddings.py` first."
-                        )
-                    except Exception as exc:
-                        st.error(f"Search failed: {exc}")
+def render_chat_tab(llm_client: LLMClient) -> None:
+    _init_state()
 
-    with col_df:
-        if st.button("Search in DeepFashion", use_container_width=True):
-            if not query:
-                st.warning("Say what you are looking for in the chat first.")
-            else:
-                with st.spinner(f'Searching DeepFashion for "{query}"…'):
-                    try:
-                        panel = _run_deepfashion_search(query)
-                        st.session_state.chat_search_panel = panel
-                    except FileNotFoundError:
-                        st.error(
-                            "DeepFashion embeddings not found. "
-                            "Run the embedding generation script first."
-                        )
-                    except Exception as exc:
-                        st.error(f"Search failed: {exc}")
+    left_col, right_col = st.columns([1, 1], gap="medium")
 
-    # Results panel
-    panel = st.session_state.chat_search_panel
-    if panel:
-        catalog = panel["catalog"]
-        if panel["dataset"] == "Fashionpedia":
-            _render_fashionpedia_results(panel["results"], catalog)
-        else:
-            _render_deepfashion_results(panel["results"], catalog)
+    with left_col:
+        st.subheader("Chat")
+        _render_chat_panel(llm_client)
+
+    with right_col:
+        st.subheader("Results")
+        _render_results_panel()
