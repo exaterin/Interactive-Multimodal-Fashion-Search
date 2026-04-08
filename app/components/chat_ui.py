@@ -62,7 +62,7 @@ def _crop_bbox(image_path, bbox) -> Image.Image:
 def _run_pipeline(
     user_message: str,
     llm_client: LLMClient,
-    top_k: int = 12,
+    top_k: int = 100,
 ) -> tuple[str, List[str]]:
     """
     Run the full pipeline for one user turn:
@@ -170,7 +170,7 @@ def _render_results_panel() -> None:
 
     st.markdown(f"*{len(results)} items retrieved*")
 
-    cols_per_row = 3
+    cols_per_row = 5
     for start in range(0, len(results), cols_per_row):
         cols = st.columns(cols_per_row)
         for col, item in zip(cols, results[start : start + cols_per_row]):
@@ -191,6 +191,26 @@ def _render_results_panel() -> None:
                 score = item.get("score")
                 if score is not None:
                     st.caption(f"{score:.3f}")
+
+    # --- State log ---
+    st.divider()
+    with st.expander("Search state log", expanded=False):
+        ss = st.session_state[_STATE_KEY]
+        rows = [
+            ("Original query", ss.original_query or "—"),
+            ("Current query", ss.current_query or "—"),
+            ("Category", ss.category or "—"),
+            ("Must have", ", ".join(ss.positive_constraints) if ss.positive_constraints else "—"),
+            ("Must NOT have", ", ".join(ss.negative_constraints) if ss.negative_constraints else "—"),
+            ("Style tags", ", ".join(ss.style_tags) if ss.style_tags else "—"),
+            ("Occasion", ss.occasion or "—"),
+            ("Budget", ss.budget or "—"),
+            ("Last suggestions", " | ".join(ss.last_suggestions) if ss.last_suggestions else "—"),
+        ]
+        for label, value in rows:
+            col_l, col_r = st.columns([2, 5])
+            col_l.markdown(f"**{label}**")
+            col_r.markdown(value)
 
 
 # Chat panel

@@ -46,20 +46,16 @@ class SearchState:
         return "\n".join(parts) if parts else "No active constraints (first query)"
 
     def update_from_llm(self, llm_data: dict) -> None:
-        """Apply structured fields returned by the LLM response generator."""
+
         if llm_data.get("category"):
             self.category = llm_data["category"]
-        if llm_data.get("positive_constraints"):
-            for c in llm_data["positive_constraints"]:
-                if c and c not in self.positive_constraints:
-                    self.positive_constraints.append(c)
-        if llm_data.get("negative_constraints"):
-            for c in llm_data["negative_constraints"]:
-                if c and c not in self.negative_constraints:
-                    self.negative_constraints.append(c)
-        if llm_data.get("style_tags"):
-            for t in llm_data["style_tags"]:
-                if t and t not in self.style_tags:
-                    self.style_tags.append(t)
+
+        if "positive_constraints" in llm_data:
+            self.positive_constraints = [c for c in llm_data["positive_constraints"] if c]
+        if "negative_constraints" in llm_data:
+            self.negative_constraints = [c for c in llm_data["negative_constraints"] if c]
+        if "style_tags" in llm_data:
+            self.style_tags = [t for t in llm_data["style_tags"] if t]
+
         if llm_data.get("occasion"):
             self.occasion = llm_data["occasion"]
