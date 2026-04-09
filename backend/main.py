@@ -9,8 +9,11 @@ Endpoints:
 
 from __future__ import annotations
 
+import asyncio
+import functools
 import io
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -47,9 +50,16 @@ class SearchStateSchema(BaseModel):
     budget: str = ""
 
 
+class LikedItemSchema(BaseModel):
+    id: str
+    category: Optional[str] = None
+    attributes: Optional[Dict[str, List[str]]] = None
+
+
 class ChatRequest(BaseModel):
     message: str
     search_state: SearchStateSchema
+    liked_items: List[LikedItemSchema] = []
 
 
 class ProductSchema(BaseModel):
@@ -98,6 +108,19 @@ def _from_dataclass(s: _SearchState) -> SearchStateSchema:
 _catalog = None
 _encoder = None
 _llm_client = None
+_thread_pool = ThreadPoolExecutor(max_workers=8)
+
+
+@functools.lru_cache(maxsize=2000)
+def _load_and_crop_image(item_id: str, image_path_str: str, bbox_tuple: Optional[tuple]) -> bytes:
+    """Load, crop, and JPEG-encode an image. Result is cached in-process."""
+    img = Image.open(image_path_str).convert("RGB")
+    if bbox_tuple:
+        x, y, w, h = (int(v) for v in bbox_tuple)
+        img = img.crop((x, y, x + w, y + h))
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=85, optimize=True)
+    return buf.getvalue()
 
 
 @asynccontextmanager
@@ -132,6 +155,25 @@ app.add_middleware(
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
+def _build_liked_context(liked_items: List[LikedItemSchema]) -> str:
+    if not liked_items:
+        return ""
+    lines = [f"The user has liked {len(liked_items)} item(s) from the current results:"]
+    for item in liked_items:
+        parts: List[str] = []
+        if item.category:
+            parts.append(f"category={item.category}")
+        if item.attributes:
+            for attr_key, attr_vals in item.attributes.items():
+                parts.append(f"{attr_key}={', '.join(attr_vals)}")
+        lines.append("  - " + ("; ".join(parts) if parts else "(no attributes)"))
+    lines.append(
+        "Use these liked items to heavily influence the updated_query and suggestions "
+        "— prioritise attributes that appear in multiple liked items."
+    )
+    return "\n".join(lines)
+
+
 @app.post("/chat", response_model=ChatResponseSchema)
 async def chat(req: ChatRequest) -> ChatResponseSchema:
     search_state = _to_dataclass(req.search_state)
@@ -156,7 +198,7 @@ async def chat(req: ChatRequest) -> ChatResponseSchema:
         catalog=_catalog,
         encoder=_encoder,
         query_text=retrieval_query,
-        top_k=50,
+        top_k=200,
     )
 
     # 2. Grounding analysis
@@ -165,11 +207,13 @@ async def chat(req: ChatRequest) -> ChatResponseSchema:
     print(grounding)
 
     # 3. LLM response
+    liked_context = _build_liked_context(req.liked_items)
     response_text, suggestions, updated_query, llm_data = generate_grounded_response(
         user_message=req.message,
         search_state=search_state,
         grounding_context=grounding,
         llm_client=_llm_client,
+        liked_context=liked_context,
     )
 
     # 4. Update state
@@ -197,7 +241,7 @@ async def chat(req: ChatRequest) -> ChatResponseSchema:
             catalog=_catalog,
             encoder=_encoder,
             query_text=updated_query,
-            top_k=50,
+            top_k=200,
         )
 
     # 6. Build product list
@@ -238,7 +282,7 @@ async def reset() -> None:
 
 @app.get("/images/{item_id}")
 async def get_image(item_id: str) -> Response:
-    """Serve a bbox-cropped Fashionpedia image as JPEG."""
+    """Serve a bbox-cropped Fashionpedia image as JPEG (LRU-cached + thread-offloaded)."""
     if _catalog is None:
         raise HTTPException(status_code=503, detail="Catalog not loaded yet")
 
@@ -248,17 +292,19 @@ async def get_image(item_id: str) -> Response:
     if not image_path or not image_path.exists():
         raise HTTPException(status_code=404, detail=f"Image not found: {item_id}")
 
-    try:
-        img = Image.open(str(image_path)).convert("RGB")
-        if bbox:
-            x, y, w, h = (int(v) for v in bbox)
-            img = img.crop((x, y, x + w, y + h))
+    bbox_tuple = tuple(bbox) if bbox else None
 
-        buf = io.BytesIO()
-        img.save(buf, format="JPEG", quality=85, optimize=True)
-        buf.seek(0)
+    try:
+        loop = asyncio.get_running_loop()
+        content = await loop.run_in_executor(
+            _thread_pool,
+            _load_and_crop_image,
+            item_id,
+            str(image_path),
+            bbox_tuple,
+        )
         return Response(
-            content=buf.getvalue(),
+            content=content,
             media_type="image/jpeg",
             headers={"Cache-Control": "public, max-age=86400"},
         )

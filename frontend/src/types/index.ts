@@ -1,5 +1,11 @@
 // ── Domain types ──────────────────────────────────────────────────────────────
 
+export interface LikedItem {
+  id: string;
+  category?: string;
+  attributes?: Record<string, string[]>;
+}
+
 export interface Message {
   id: string;
   role: "user" | "assistant";
@@ -34,6 +40,7 @@ export interface SearchState {
 export interface ChatRequest {
   message: string;
   search_state: SearchState;
+  liked_items?: LikedItem[];
 }
 
 /** Shape returned by POST /api/chat */

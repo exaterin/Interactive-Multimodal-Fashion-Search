@@ -69,6 +69,7 @@ def generate_grounded_response(
     search_state: SearchState,
     grounding_context: GroundingContext,
     llm_client: LLMClient,
+    liked_context: str = "",
 ) -> Tuple[str, List[str], str, dict]:
     """
     Generate a grounded assistant response using actual retrieval context.
@@ -76,10 +77,12 @@ def generate_grounded_response(
     Returns:
         (response_text, suggestions, updated_query, raw_llm_data)
     """
+    liked_section = f"\n\n{liked_context}" if liked_context else ""
     user_content = (
         f"Current search state:\n{search_state.to_context_str()}\n\n"
         f"What was actually retrieved from the catalog:\n"
-        f"{grounding_context.to_prompt_str()}\n\n"
+        f"{grounding_context.to_prompt_str()}"
+        f"{liked_section}\n\n"
         f"User's message: \"{user_message}\"\n\n"
         f"Respond using ONLY information present in the retrieved results above."
     )

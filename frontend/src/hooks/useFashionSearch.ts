@@ -3,7 +3,7 @@
 import { useState, useCallback } from "react";
 import { sendChatMessage, resetChat } from "@/lib/api";
 import { makeId, initialSearchState } from "@/lib/utils";
-import type { Message, Product, SearchState } from "@/types";
+import type { Message, Product, SearchState, LikedItem } from "@/types";
 
 interface UseFashionSearch {
   messages: Message[];
@@ -11,9 +11,12 @@ interface UseFashionSearch {
   searchState: SearchState;
   isLoading: boolean;
   error: string | null;
+  likedProducts: Map<string, Product>;
   sendMessage: (text: string) => Promise<void>;
   clearChat: () => void;
   removePositiveConstraint: (constraint: string) => Promise<void>;
+  toggleLike: (product: Product) => void;
+  clearLiked: () => void;
 }
 
 export function useFashionSearch(): UseFashionSearch {
@@ -24,13 +27,38 @@ export function useFashionSearch(): UseFashionSearch {
   );
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [likedProducts, setLikedProducts] = useState<Map<string, Product>>(
+    new Map()
+  );
+
+  const toggleLike = useCallback((product: Product) => {
+    setLikedProducts((prev) => {
+      const next = new Map(prev);
+      if (next.has(product.id)) {
+        next.delete(product.id);
+      } else {
+        next.set(product.id, product);
+      }
+      return next;
+    });
+  }, []);
+
+  const clearLiked = useCallback(() => {
+    setLikedProducts(new Map());
+  }, []);
+
+  const _buildLikedItems = (map: Map<string, Product>): LikedItem[] =>
+    Array.from(map.values()).map((p) => ({
+      id: p.id,
+      category: p.category,
+      attributes: p.attributes,
+    }));
 
   const sendMessage = useCallback(
     async (text: string) => {
       if (!text.trim() || isLoading) return;
       setError(null);
 
-      // Optimistically append the user message
       const userMsg: Message = {
         id: makeId(),
         role: "user",
@@ -44,6 +72,7 @@ export function useFashionSearch(): UseFashionSearch {
         const response = await sendChatMessage({
           message: text.trim(),
           search_state: searchState,
+          liked_items: _buildLikedItems(likedProducts),
         });
 
         const assistantMsg: Message = {
@@ -61,7 +90,6 @@ export function useFashionSearch(): UseFashionSearch {
         const message = err instanceof Error ? err.message : "Unexpected error";
         setError(message);
 
-        // Show error as an assistant message so the user sees it inline
         setMessages((prev) => [
           ...prev,
           {
@@ -75,17 +103,16 @@ export function useFashionSearch(): UseFashionSearch {
         setIsLoading(false);
       }
     },
-    [isLoading, searchState]
+    [isLoading, searchState, likedProducts]
   );
 
   const clearChat = useCallback(async () => {
-    // Fire-and-forget: notify the backend, but don't block UI reset
     resetChat().catch(() => null);
-
     setMessages([]);
     setProducts([]);
     setSearchState(initialSearchState());
     setError(null);
+    setLikedProducts(new Map());
   }, []);
 
   const removePositiveConstraint = useCallback(
@@ -114,6 +141,7 @@ export function useFashionSearch(): UseFashionSearch {
         const response = await sendChatMessage({
           message: `The user removed the constraint "${constraint}". Refresh results without it.`,
           search_state: updatedState,
+          liked_items: _buildLikedItems(likedProducts),
         });
 
         setMessages((prev) => [
@@ -144,8 +172,20 @@ export function useFashionSearch(): UseFashionSearch {
         setIsLoading(false);
       }
     },
-    [isLoading, searchState]
+    [isLoading, searchState, likedProducts]
   );
 
-  return { messages, products, searchState, isLoading, error, sendMessage, clearChat, removePositiveConstraint };
+  return {
+    messages,
+    products,
+    searchState,
+    isLoading,
+    error,
+    likedProducts,
+    sendMessage,
+    clearChat,
+    removePositiveConstraint,
+    toggleLike,
+    clearLiked,
+  };
 }

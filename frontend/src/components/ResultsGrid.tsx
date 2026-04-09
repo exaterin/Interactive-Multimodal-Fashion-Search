@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { Heart } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import type { Product, SearchState } from "@/types";
 
@@ -9,6 +10,8 @@ interface ResultsGridProps {
   products: Product[];
   searchState: SearchState;
   isLoading: boolean;
+  likedIds: Set<string>;
+  onToggleLike: (product: Product) => void;
   onRemoveConstraint?: (constraint: string) => void;
 }
 
@@ -16,10 +19,13 @@ export function ResultsGrid({
   products,
   searchState,
   isLoading,
+  likedIds,
+  onToggleLike,
   onRemoveConstraint,
 }: ResultsGridProps) {
   const hasQuery = !!searchState.current_query;
   const hasResults = products.length > 0;
+  const likedCount = likedIds.size;
 
   return (
     <div className="flex flex-col h-full">
@@ -27,9 +33,17 @@ export function ResultsGrid({
       <div className="px-5 py-3 border-b border-gray-100 flex-shrink-0">
         <div className="flex items-center justify-between">
           <h2 className="text-sm font-semibold text-gray-900">Results</h2>
-          {hasResults && (
-            <span className="text-xs text-gray-400">{products.length} items</span>
-          )}
+          <div className="flex items-center gap-3">
+            {likedCount > 0 && (
+              <span className="flex items-center gap-1 text-xs text-rose-500 font-medium">
+                <Heart className="h-3 w-3 fill-rose-500" />
+                {likedCount} liked
+              </span>
+            )}
+            {hasResults && (
+              <span className="text-xs text-gray-400">{products.length} items</span>
+            )}
+          </div>
         </div>
 
         {/* Active search state summary */}
@@ -84,7 +98,12 @@ export function ResultsGrid({
             <p className="text-xs text-gray-400 mt-1">Try a broader query.</p>
           </div>
         ) : (
-          <ProductGrid products={products} isLoading={isLoading} />
+          <ProductGrid
+            products={products}
+            isLoading={isLoading}
+            likedIds={likedIds}
+            onToggleLike={onToggleLike}
+          />
         )}
       </div>
     </div>
@@ -96,12 +115,16 @@ export function ResultsGrid({
 function ProductGrid({
   products,
   isLoading,
+  likedIds,
+  onToggleLike,
 }: {
   products: Product[];
   isLoading: boolean;
+  likedIds: Set<string>;
+  onToggleLike: (p: Product) => void;
 }) {
   return (
-    <div className="grid grid-cols-5 gap-3">
+    <div className="grid grid-cols-6 gap-3">
       <AnimatePresence mode="popLayout">
         {products.map((product, i) => (
           <motion.div
@@ -112,7 +135,11 @@ function ProductGrid({
             transition={{ delay: Math.min(i * 0.04, 0.3), duration: 0.2 }}
             className={isLoading ? "opacity-50 pointer-events-none" : ""}
           >
-            <ProductCard product={product} />
+            <ProductCard
+              product={product}
+              isLiked={likedIds.has(product.id)}
+              onToggleLike={onToggleLike}
+            />
           </motion.div>
         ))}
       </AnimatePresence>
@@ -120,13 +147,29 @@ function ProductGrid({
   );
 }
 
-function ProductCard({ product }: { product: Product }) {
+function ProductCard({
+  product,
+  isLiked,
+  onToggleLike,
+}: {
+  product: Product;
+  isLiked: boolean;
+  onToggleLike: (p: Product) => void;
+}) {
   const [imgError, setImgError] = useState(false);
 
   return (
-    <div className="group rounded-xl overflow-hidden border border-gray-100 bg-white hover:border-gray-200 hover:shadow-sm transition-all duration-150">
+    <div
+      className={[
+        "group rounded-xl overflow-hidden border bg-white transition-all duration-150 cursor-pointer",
+        isLiked
+          ? "border-rose-300 shadow-[0_0_0_1px_rgb(251,113,133)]"
+          : "border-gray-100 hover:border-gray-200 hover:shadow-sm",
+      ].join(" ")}
+      onClick={() => onToggleLike(product)}
+    >
       {/* Image */}
-      <div className="aspect-[3/4] bg-gray-50 overflow-hidden">
+      <div className="aspect-[3/4] bg-gray-50 overflow-hidden relative">
         {!imgError ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
@@ -141,6 +184,23 @@ function ProductCard({ product }: { product: Product }) {
             👗
           </div>
         )}
+
+        {/* Heart overlay */}
+        <div
+          className={[
+            "absolute top-1.5 right-1.5 rounded-full p-1 transition-all duration-150",
+            isLiked
+              ? "bg-rose-500 opacity-100"
+              : "bg-white/70 opacity-0 group-hover:opacity-100",
+          ].join(" ")}
+        >
+          <Heart
+            className={[
+              "h-3 w-3 transition-colors",
+              isLiked ? "text-white fill-white" : "text-gray-500",
+            ].join(" ")}
+          />
+        </div>
       </div>
 
       {/* Info */}
@@ -195,8 +255,8 @@ function EmptyState() {
 
 function LoadingSkeleton() {
   return (
-    <div className="grid grid-cols-5 gap-3">
-      {Array.from({ length: 15 }).map((_, i) => (
+    <div className="grid grid-cols-6 gap-3">
+      {Array.from({ length: 18 }).map((_, i) => (
         <div
           key={i}
           className="rounded-xl overflow-hidden border border-gray-100"

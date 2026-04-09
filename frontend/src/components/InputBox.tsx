@@ -10,13 +10,20 @@ interface InputBoxProps {
   onSend: (text: string) => void;
   disabled?: boolean;
   placeholder?: string;
+  likedCount?: number;
 }
 
 export function InputBox({
   onSend,
   disabled = false,
-  placeholder = "Describe what you're looking for…",
+  placeholder,
+  likedCount = 0,
 }: InputBoxProps) {
+  const resolvedPlaceholder =
+    placeholder ??
+    (likedCount > 0
+      ? `${likedCount} item${likedCount !== 1 ? "s" : ""} liked — describe what you want…`
+      : "Describe what you're looking for…");
   const [value, setValue] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -63,7 +70,7 @@ export function InputBox({
           onChange={handleChange}
           onKeyDown={handleKeyDown}
           disabled={disabled}
-          placeholder={placeholder}
+          placeholder={resolvedPlaceholder}
           className={cn(
             "flex-1 resize-none bg-transparent text-sm text-gray-900",
             "placeholder:text-gray-400 focus:outline-none leading-relaxed",

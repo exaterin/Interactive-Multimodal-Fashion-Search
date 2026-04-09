@@ -10,10 +10,15 @@ export default function Home() {
     products,
     searchState,
     isLoading,
+    likedProducts,
     sendMessage,
     clearChat,
     removePositiveConstraint,
+    toggleLike,
+    clearLiked,
   } = useFashionSearch();
+
+  const likedIds = new Set(likedProducts.keys());
 
   return (
     <div className="flex h-screen overflow-hidden bg-white">
@@ -22,8 +27,10 @@ export default function Home() {
         <ChatPanel
           messages={messages}
           isLoading={isLoading}
+          likedCount={likedProducts.size}
           onSend={sendMessage}
           onClear={clearChat}
+          onClearLiked={clearLiked}
         />
       </div>
 
@@ -33,6 +40,8 @@ export default function Home() {
           products={products}
           searchState={searchState}
           isLoading={isLoading}
+          likedIds={likedIds}
+          onToggleLike={toggleLike}
           onRemoveConstraint={removePositiveConstraint}
         />
       </div>
