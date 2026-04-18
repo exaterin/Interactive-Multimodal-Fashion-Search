@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Heart } from "lucide-react";
+import { Search } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import type { Product, SearchState } from "@/types";
 
@@ -10,8 +10,9 @@ interface ResultsGridProps {
   products: Product[];
   searchState: SearchState;
   isLoading: boolean;
-  likedIds: Set<string>;
+  likedId: string | null;
   onToggleLike: (product: Product) => void;
+  onFindSimilar: () => void;
   onRemoveConstraint?: (constraint: string) => void;
 }
 
@@ -19,13 +20,13 @@ export function ResultsGrid({
   products,
   searchState,
   isLoading,
-  likedIds,
+  likedId,
   onToggleLike,
+  onFindSimilar,
   onRemoveConstraint,
 }: ResultsGridProps) {
   const hasQuery = !!searchState.current_query;
   const hasResults = products.length > 0;
-  const likedCount = likedIds.size;
 
   return (
     <div className="flex flex-col h-full">
@@ -33,17 +34,9 @@ export function ResultsGrid({
       <div className="px-5 py-3 border-b border-gray-100 flex-shrink-0">
         <div className="flex items-center justify-between">
           <h2 className="text-sm font-semibold text-gray-900">Results</h2>
-          <div className="flex items-center gap-3">
-            {likedCount > 0 && (
-              <span className="flex items-center gap-1 text-xs text-rose-500 font-medium">
-                <Heart className="h-3 w-3 fill-rose-500" />
-                {likedCount} liked
-              </span>
-            )}
-            {hasResults && (
-              <span className="text-xs text-gray-400">{products.length} items</span>
-            )}
-          </div>
+          {hasResults && (
+            <span className="text-xs text-gray-400">{products.length} items</span>
+          )}
         </div>
 
         {/* Active search state summary */}
@@ -101,8 +94,9 @@ export function ResultsGrid({
           <ProductGrid
             products={products}
             isLoading={isLoading}
-            likedIds={likedIds}
+            likedId={likedId}
             onToggleLike={onToggleLike}
+            onFindSimilar={onFindSimilar}
           />
         )}
       </div>
@@ -115,13 +109,15 @@ export function ResultsGrid({
 function ProductGrid({
   products,
   isLoading,
-  likedIds,
+  likedId,
   onToggleLike,
+  onFindSimilar,
 }: {
   products: Product[];
   isLoading: boolean;
-  likedIds: Set<string>;
+  likedId: string | null;
   onToggleLike: (p: Product) => void;
+  onFindSimilar: () => void;
 }) {
   return (
     <div className="grid grid-cols-6 gap-3">
@@ -137,8 +133,9 @@ function ProductGrid({
           >
             <ProductCard
               product={product}
-              isLiked={likedIds.has(product.id)}
+              isLiked={product.id === likedId}
               onToggleLike={onToggleLike}
+              onFindSimilar={onFindSimilar}
             />
           </motion.div>
         ))}
@@ -151,10 +148,12 @@ function ProductCard({
   product,
   isLiked,
   onToggleLike,
+  onFindSimilar,
 }: {
   product: Product;
   isLiked: boolean;
   onToggleLike: (p: Product) => void;
+  onFindSimilar: () => void;
 }) {
   const [imgError, setImgError] = useState(false);
 
@@ -185,22 +184,19 @@ function ProductCard({
           </div>
         )}
 
-        {/* Heart overlay */}
-        <div
-          className={[
-            "absolute top-1.5 right-1.5 rounded-full p-1 transition-all duration-150",
-            isLiked
-              ? "bg-rose-500 opacity-100"
-              : "bg-white/70 opacity-0 group-hover:opacity-100",
-          ].join(" ")}
-        >
-          <Heart
-            className={[
-              "h-3 w-3 transition-colors",
-              isLiked ? "text-white fill-white" : "text-gray-500",
-            ].join(" ")}
-          />
-        </div>
+        {/* "Find similar" button — only on liked card */}
+        {isLiked && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onFindSimilar();
+            }}
+            className="absolute inset-x-0 bottom-0 flex items-center justify-center gap-1 bg-rose-500 hover:bg-rose-600 text-white text-[10px] font-semibold py-1.5 transition-colors"
+          >
+            <Search className="h-2.5 w-2.5" />
+            Find similar
+          </button>
+        )}
       </div>
 
       {/* Info */}

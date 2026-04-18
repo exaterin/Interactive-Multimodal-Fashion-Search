@@ -57,6 +57,26 @@ export function MessageList({
               <div
                 className={`max-w-[85%] ${isUser ? "items-end" : "items-start"} flex flex-col gap-1`}
               >
+                {/* Liked-item thumbnails (shown above the bubble for visual similarity requests) */}
+                {isUser && msg.likedImages && msg.likedImages.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 justify-end mb-1">
+                    {msg.likedImages.slice(0, 6).map((url, i) => (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        key={i}
+                        src={url}
+                        alt="liked item"
+                        className="h-14 w-10 object-cover rounded-lg border border-white/20"
+                      />
+                    ))}
+                    {msg.likedImages.length > 6 && (
+                      <div className="h-14 w-10 rounded-lg bg-gray-700 flex items-center justify-center text-white text-xs font-medium">
+                        +{msg.likedImages.length - 6}
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {/* Bubble */}
                 <div
                   className={`px-3.5 py-2.5 rounded-2xl text-sm leading-relaxed ${

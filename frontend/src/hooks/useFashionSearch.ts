@@ -13,10 +13,10 @@ interface UseFashionSearch {
   error: string | null;
   likedProducts: Map<string, Product>;
   sendMessage: (text: string) => Promise<void>;
+  findSimilar: () => Promise<void>;
   clearChat: () => void;
   removePositiveConstraint: (constraint: string) => Promise<void>;
   toggleLike: (product: Product) => void;
-  clearLiked: () => void;
 }
 
 export function useFashionSearch(): UseFashionSearch {
@@ -33,19 +33,15 @@ export function useFashionSearch(): UseFashionSearch {
 
   const toggleLike = useCallback((product: Product) => {
     setLikedProducts((prev) => {
-      const next = new Map(prev);
-      if (next.has(product.id)) {
-        next.delete(product.id);
-      } else {
-        next.set(product.id, product);
+      // Single selection: clicking the same item deselects it,
+      // clicking a different item replaces the current selection.
+      if (prev.has(product.id)) {
+        return new Map();
       }
-      return next;
+      return new Map([[product.id, product]]);
     });
   }, []);
 
-  const clearLiked = useCallback(() => {
-    setLikedProducts(new Map());
-  }, []);
 
   const _buildLikedItems = (map: Map<string, Product>): LikedItem[] =>
     Array.from(map.values()).map((p) => ({
@@ -105,6 +101,59 @@ export function useFashionSearch(): UseFashionSearch {
     },
     [isLoading, searchState, likedProducts]
   );
+
+  const findSimilar = useCallback(async () => {
+    if (isLoading || likedProducts.size === 0) return;
+    setError(null);
+
+    const likedList = Array.from(likedProducts.values());
+    const userMsg: Message = {
+      id: makeId(),
+      role: "user",
+      content: `Find items visually similar to my ${likedList.length} liked item${likedList.length !== 1 ? "s" : ""}`,
+      likedImages: likedList.map((p) => p.image_url),
+      timestamp: new Date(),
+    };
+    setMessages((prev) => [...prev, userMsg]);
+    setIsLoading(true);
+
+    try {
+      const response = await sendChatMessage({
+        message: userMsg.content,
+        search_state: searchState,
+        liked_items: _buildLikedItems(likedProducts),
+        use_image_similarity: true,
+      });
+
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: makeId(),
+          role: "assistant",
+          content: response.message,
+          suggestions: response.suggestions ?? [],
+          timestamp: new Date(),
+        },
+      ]);
+      setProducts(response.products ?? []);
+      setSearchState(response.search_state ?? searchState);
+      setLikedProducts(new Map()); // clear after successful search
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Unexpected error";
+      setError(message);
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: makeId(),
+          role: "assistant",
+          content: `Sorry, something went wrong: ${message}`,
+          timestamp: new Date(),
+        },
+      ]);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [isLoading, searchState, likedProducts]);
 
   const clearChat = useCallback(async () => {
     resetChat().catch(() => null);
@@ -183,9 +232,9 @@ export function useFashionSearch(): UseFashionSearch {
     error,
     likedProducts,
     sendMessage,
+    findSimilar,
     clearChat,
     removePositiveConstraint,
     toggleLike,
-    clearLiked,
   };
 }

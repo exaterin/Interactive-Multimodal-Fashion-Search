@@ -12,6 +12,8 @@ export interface Message {
   content: string;
   /** Refinement suggestions attached to this assistant turn */
   suggestions?: string[];
+  /** Image URLs to show as thumbnails inside a user message (liked items) */
+  likedImages?: string[];
   timestamp: Date;
 }
 
@@ -41,6 +43,7 @@ export interface ChatRequest {
   message: string;
   search_state: SearchState;
   liked_items?: LikedItem[];
+  use_image_similarity?: boolean;
 }
 
 /** Shape returned by POST /api/chat */

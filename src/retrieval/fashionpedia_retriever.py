@@ -102,6 +102,29 @@ def _rank_results(
 
 # Search functions
 
+def search_by_embedding_fp(
+    catalog: FashionpediaCatalog,
+    query_embedding: np.ndarray,
+    top_k: int = 200,
+    exclude_ids: Optional[List[str]] = None,
+) -> List[dict]:
+    """
+    Cosine search with a pre-computed, L2-normalised embedding vector.
+    Used for image-to-image similarity (liked items).
+    """
+    exclude_set = set(exclude_ids) if exclude_ids else set()
+    if exclude_set:
+        candidate_indices = np.array([
+            i for i, iid in enumerate(catalog.item_ids) if iid not in exclude_set
+        ])
+        scores = catalog.embeddings[candidate_indices] @ query_embedding
+    else:
+        candidate_indices = np.arange(len(catalog.item_ids))
+        scores = catalog.embeddings @ query_embedding
+
+    return _rank_results(scores, catalog, candidate_indices, top_k)
+
+
 def search_clip_fp(
     catalog: FashionpediaCatalog,
     encoder: FashionCLIPEncoder,

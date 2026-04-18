@@ -34,6 +34,7 @@ Intent types:
 - remove_constraint     — "remove the color filter", "forget the length"
 - style_or_occasion     — "for a wedding", "casual summer look"
 - browse_intent         — "show me more", "what else is there"
+- image_similarity      — user liked item(s) and triggered visual similarity search
 - reset                 — "start over", "new search", "forget everything"
 
 Rules:
@@ -45,6 +46,7 @@ Rules:
 - Keep the response warm but brief.
 - The updated_query must be a concise retrieval phrase (not a sentence).
 - For a reset intent: set updated_query to "" and suggestions to [] and all constraint lists to [].
+- For an image_similarity intent: write a warm 1-2 sentence response acknowledging the visual search. Extract the most distinctive shared attributes from the liked items provided in context and place them in positive_constraints — this grounds all future text searches in those visual preferences.
 - positive_constraints / negative_constraints / style_tags must always reflect the FULL active set after this turn, not just additions.
 
 Return ONLY a valid JSON object. Do not add markdown fences or extra text.
