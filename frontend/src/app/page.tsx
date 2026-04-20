@@ -11,6 +11,8 @@ export default function Home() {
     searchState,
     isLoading,
     likedProducts,
+    groundingMode,
+    setGroundingMode,
     sendMessage,
     findSimilar,
     clearChat,
@@ -27,6 +29,8 @@ export default function Home() {
         <ChatPanel
           messages={messages}
           isLoading={isLoading}
+          groundingMode={groundingMode}
+          onGroundingModeChange={setGroundingMode}
           onSend={sendMessage}
           onClear={clearChat}
         />

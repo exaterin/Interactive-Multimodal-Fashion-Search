@@ -12,6 +12,8 @@ interface UseFashionSearch {
   isLoading: boolean;
   error: string | null;
   likedProducts: Map<string, Product>;
+  groundingMode: "attribute" | "image";
+  setGroundingMode: (mode: "attribute" | "image") => void;
   sendMessage: (text: string) => Promise<void>;
   findSimilar: () => Promise<void>;
   clearChat: () => void;
@@ -29,6 +31,9 @@ export function useFashionSearch(): UseFashionSearch {
   const [error, setError] = useState<string | null>(null);
   const [likedProducts, setLikedProducts] = useState<Map<string, Product>>(
     new Map()
+  );
+  const [groundingMode, setGroundingMode] = useState<"attribute" | "image">(
+    "attribute"
   );
 
   const toggleLike = useCallback((product: Product) => {
@@ -69,6 +74,7 @@ export function useFashionSearch(): UseFashionSearch {
           message: text.trim(),
           search_state: searchState,
           liked_items: _buildLikedItems(likedProducts),
+          grounding_mode: groundingMode,
         });
 
         const assistantMsg: Message = {
@@ -99,7 +105,7 @@ export function useFashionSearch(): UseFashionSearch {
         setIsLoading(false);
       }
     },
-    [isLoading, searchState, likedProducts]
+    [isLoading, searchState, likedProducts, groundingMode]
   );
 
   const findSimilar = useCallback(async () => {
@@ -123,6 +129,7 @@ export function useFashionSearch(): UseFashionSearch {
         search_state: searchState,
         liked_items: _buildLikedItems(likedProducts),
         use_image_similarity: true,
+        grounding_mode: groundingMode,
       });
 
       setMessages((prev) => [
@@ -153,7 +160,7 @@ export function useFashionSearch(): UseFashionSearch {
     } finally {
       setIsLoading(false);
     }
-  }, [isLoading, searchState, likedProducts]);
+  }, [isLoading, searchState, likedProducts, groundingMode]);
 
   const clearChat = useCallback(async () => {
     resetChat().catch(() => null);
@@ -191,6 +198,7 @@ export function useFashionSearch(): UseFashionSearch {
           message: `The user removed the constraint "${constraint}". Refresh results without it.`,
           search_state: updatedState,
           liked_items: _buildLikedItems(likedProducts),
+          grounding_mode: groundingMode,
         });
 
         setMessages((prev) => [
@@ -221,7 +229,7 @@ export function useFashionSearch(): UseFashionSearch {
         setIsLoading(false);
       }
     },
-    [isLoading, searchState, likedProducts]
+    [isLoading, searchState, likedProducts, groundingMode]
   );
 
   return {
@@ -231,6 +239,8 @@ export function useFashionSearch(): UseFashionSearch {
     isLoading,
     error,
     likedProducts,
+    groundingMode,
+    setGroundingMode,
     sendMessage,
     findSimilar,
     clearChat,
