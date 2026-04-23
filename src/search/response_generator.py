@@ -44,7 +44,7 @@ Rules:
 - Do NOT ask vague questions like "what style do you prefer?".
 - If the query is already very specific and results look good, use fewer suggestions.
 - Keep the response warm but brief.
-- The updated_query must be a concise retrieval phrase (not a sentence).
+- updated_query is used directly as a CLIP text embedding query. Make it as descriptive and attribute-rich as possible: include category, colors, materials, patterns, silhouette, length, and style keywords drawn from the active constraints and liked item attributes. Prefer dense noun phrases over short generic terms. Example: "fitted floral midi dress red navy v-neck cotton" beats "floral dress". The richer the query, the better CLIP retrieval quality.
 - For a reset intent: set updated_query to "" and suggestions to [] and all constraint lists to [].
 - For an image_similarity intent: write a warm 1-2 sentence response acknowledging the visual search. Extract the most distinctive shared attributes from the liked items provided in context and place them in positive_constraints — this grounds all future text searches in those visual preferences.
 - positive_constraints / negative_constraints / style_tags must always reflect the FULL active set after this turn, not just additions.

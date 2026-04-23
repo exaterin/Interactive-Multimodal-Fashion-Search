@@ -18,7 +18,6 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Dict, List, Optional
 
-import numpy as np
 import uvicorn
 from fastapi import FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
@@ -33,8 +32,9 @@ if str(PROJECT_ROOT) not in sys.path:
 from src.conversation.llm_client import LLMClient
 from src.data.fashionpedia.loaders import load_fashionpedia_catalog
 from src.models.fashion_clip_encoder import build_fashion_clip_encoder
-from src.retrieval.fashionpedia_retriever import search_clip_fp, search_by_embedding_fp
+from src.retrieval.fashionpedia_retriever import search_clip_fp
 from src.search.grounding_analyzer import analyze_results
+from src.search.relevance_feedback import FeedbackItem, build_feedback_context
 from src.search.response_generator import generate_grounded_response
 from src.search.search_state import SearchState as _SearchState
 
@@ -61,7 +61,6 @@ class ChatRequest(BaseModel):
     message: str
     search_state: SearchStateSchema
     liked_items: List[LikedItemSchema] = []
-    use_image_similarity: bool = False
 
 
 class ProductSchema(BaseModel):
@@ -157,53 +156,15 @@ app.add_middleware(
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
-def _average_liked_embeddings(liked_items: List[LikedItemSchema]) -> Optional[np.ndarray]:
-    """Return L2-normalised mean of catalog embeddings for the liked item IDs."""
-    id_to_idx = {iid: i for i, iid in enumerate(_catalog.item_ids)}
-    vecs = []
-    for item in liked_items:
-        idx = id_to_idx.get(item.id)
-        if idx is not None:
-            vecs.append(_catalog.embeddings[idx])
-    if not vecs:
-        return None
-    mean = np.mean(vecs, axis=0).astype(np.float32)
-    norm = np.linalg.norm(mean)
-    if norm > 0:
-        mean /= norm
-    return mean
-
-
-def _build_liked_context(liked_items: List[LikedItemSchema], use_image_similarity: bool = False) -> str:
-    if not liked_items:
-        return ""
-    lines = [
-        f"The user liked {len(liked_items)} item(s) and triggered a VISUAL SIMILARITY search:"
-        if use_image_similarity
-        else f"The user has liked {len(liked_items)} item(s) from the current results:"
+def _to_feedback_items(liked_items: List[LikedItemSchema]) -> List[FeedbackItem]:
+    return [
+        FeedbackItem(
+            id=item.id,
+            category=item.category or "",
+            attributes=dict(item.attributes or {}),
+        )
+        for item in liked_items
     ]
-    for item in liked_items:
-        parts: List[str] = []
-        if item.category:
-            parts.append(f"category={item.category}")
-        if item.attributes:
-            for attr_key, attr_vals in item.attributes.items():
-                parts.append(f"{attr_key}={', '.join(attr_vals)}")
-        lines.append("  - " + ("; ".join(parts) if parts else "(no attributes)"))
-    if use_image_similarity:
-        lines.append(
-            "Results were retrieved by CLIP image-to-image similarity — not by text query. "
-            "Your response should acknowledge this. "
-            "Extract the most distinctive shared attributes from the liked items above and "
-            "set them as positive_constraints in your response, so future text searches are "
-            "grounded in those visual preferences."
-        )
-    else:
-        lines.append(
-            "Prioritise attributes that appear in multiple liked items when forming "
-            "updated_query and positive_constraints."
-        )
-    return "\n".join(lines)
 
 
 @app.post("/chat", response_model=ChatResponseSchema)
@@ -225,27 +186,14 @@ async def chat(req: ChatRequest) -> ChatResponseSchema:
     print(f"[STATE] budget:                {search_state.budget!r}")
     print(f"{'='*60}\n")
 
-    # 1. Retrieve — use image-to-image similarity when triggered from liked items
-    liked_embedding = None
-    if req.use_image_similarity and req.liked_items:
-        liked_embedding = _average_liked_embeddings(req.liked_items)
-
-    if liked_embedding is not None:
-        liked_ids = [item.id for item in req.liked_items]
-        results = search_by_embedding_fp(
-            catalog=_catalog,
-            query_embedding=liked_embedding,
-            top_k=200,
-            exclude_ids=liked_ids,
-        )
-        print(f"[SEARCH] Image similarity from {len(liked_ids)} liked item(s)")
-    else:
-        results = search_clip_fp(
-            catalog=_catalog,
-            encoder=_encoder,
-            query_text=retrieval_query,
-            top_k=200,
-        )
+    # 1. Retrieve
+    feedback_items = _to_feedback_items(req.liked_items)
+    results = search_clip_fp(
+        catalog=_catalog,
+        encoder=_encoder,
+        query_text=retrieval_query,
+        top_k=200,
+    )
 
     # 2. Grounding analysis
     grounding = analyze_results(results, _catalog)
@@ -253,7 +201,7 @@ async def chat(req: ChatRequest) -> ChatResponseSchema:
     print(grounding)
 
     # 3. LLM response
-    liked_context = _build_liked_context(req.liked_items, req.use_image_similarity)
+    liked_context = build_feedback_context(feedback_items)
     response_text, suggestions, updated_query, llm_data = generate_grounded_response(
         user_message=req.message,
         search_state=search_state,
@@ -281,8 +229,8 @@ async def chat(req: ChatRequest) -> ChatResponseSchema:
         print(f"[QUERY REFINED] {retrieval_query!r} → {updated_query!r}")
     print(f"{'='*60}\n")
 
-    # 5. Re-retrieve with refined text query (skip when using image similarity)
-    if liked_embedding is None and updated_query and updated_query != retrieval_query:
+    # 5. Re-retrieve with refined text query
+    if updated_query and updated_query != retrieval_query:
         results = search_clip_fp(
             catalog=_catalog,
             encoder=_encoder,
