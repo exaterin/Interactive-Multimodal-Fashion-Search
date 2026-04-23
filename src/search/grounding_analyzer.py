@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 from collections import Counter
-from dataclasses import dataclass, field
-from typing import Dict, List, Tuple
+from dataclasses import dataclass
+from typing import Dict, List
 
 from src.data.fashionpedia.catalog import FashionpediaCatalog
 
 
-# Supercategories that are most useful for refinement suggestions
 _REFINEMENT_SUPERCATS = (
     "silhouette",
     "length",
@@ -17,92 +16,73 @@ _REFINEMENT_SUPERCATS = (
     "textile finishing, manufacturing techniques",
 )
 
+_CONTEXT_SIZE = 50
+
+
+@dataclass
+class ItemContext:
+    item_id: str
+    category: str
+    colors: List[str]
+    attributes: Dict[str, List[str]]  # supercategory → sorted attribute values
+
 
 @dataclass
 class GroundingContext:
     total_results: int
-    dominant_categories: List[Tuple[str, int]]          # [(name, count), ...]
-    dominant_colors: List[Tuple[str, int]]               # [(color, count), ...]
-    dominant_attributes: Dict[str, List[Tuple[str, int]]]  # {supercat: [(attr, count), ...]}
-    is_diverse: bool                                     # multiple categories present
+    items: List[ItemContext]
 
-    def to_prompt_str(self, top_n: int = 5) -> str:
-        """Render context as a concise text block for the LLM prompt."""
-        lines = [f"Total retrieved items: {self.total_results}"]
-
-        if self.dominant_categories:
-            cats = ", ".join(
-                f"{c} ({n})" for c, n in self.dominant_categories[:top_n]
-            )
-            lines.append(f"Categories found: {cats}")
-
-        if self.dominant_colors:
-            colors = ", ".join(
-                f"{c} ({n})" for c, n in self.dominant_colors[:top_n]
-            )
-            lines.append(f"Colors found: {colors}")
-
-        for supercat in _REFINEMENT_SUPERCATS:
-            attrs = self.dominant_attributes.get(supercat, [])
-            if attrs:
-                attr_str = ", ".join(f"{a} ({n})" for a, n in attrs[:4])
-                lines.append(f"{supercat.capitalize()}: {attr_str}")
-
+    def to_prompt_str(self) -> str:
+        lines = [
+            f"Total retrieved items: {self.total_results}",
+            f"Showing top {len(self.items)} items (each as attribute set):\n",
+        ]
+        for i, item in enumerate(self.items, 1):
+            parts = [f"Item {i}"]
+            if item.category:
+                parts.append(f"category: {item.category}")
+            if item.colors:
+                parts.append(f"colors: {', '.join(item.colors)}")
+            for supercat in _REFINEMENT_SUPERCATS:
+                attrs = item.attributes.get(supercat)
+                if attrs:
+                    parts.append(f"{supercat}: {', '.join(attrs)}")
+            lines.append(" | ".join(parts))
         return "\n".join(lines)
 
     def top_refinement_values(self, top_n: int = 3) -> List[str]:
-        """Return a flat list of the most frequent attribute values for quick suggestions."""
-        values: List[str] = []
-        for supercat in _REFINEMENT_SUPERCATS:
-            for attr, _ in self.dominant_attributes.get(supercat, [])[:top_n]:
-                values.append(attr)
-        return values
+        counter: Counter = Counter()
+        for item in self.items:
+            for supercat in _REFINEMENT_SUPERCATS:
+                for attr in item.attributes.get(supercat, []):
+                    counter[attr] += 1
+        return [attr for attr, _ in counter.most_common(top_n * len(_REFINEMENT_SUPERCATS))]
 
 
 def analyze_results(
     results: List[dict],
     catalog: FashionpediaCatalog,
-    top_n: int = 6,
+    context_size: int = _CONTEXT_SIZE,
 ) -> GroundingContext:
     if not results:
-        return GroundingContext(
-            total_results=0,
-            dominant_categories=[],
-            dominant_colors=[],
-            dominant_attributes={},
-            is_diverse=False,
-        )
+        return GroundingContext(total_results=0, items=[])
 
-    category_counter: Counter = Counter()
-    color_counter: Counter = Counter()
-    supercat_counters: Dict[str, Counter] = {}
+    items: List[ItemContext] = []
+    for result in results[:context_size]:
+        item_id = result["image_id"]
+        category = catalog.category_annotations.get(item_id, "")
+        colors = list(catalog.color_annotations.get(item_id, []))
+        raw_attrs = catalog.attribute_annotations.get(item_id, {})
+        attributes = {
+            supercat: sorted(raw_attrs[supercat])
+            for supercat in _REFINEMENT_SUPERCATS
+            if supercat in raw_attrs
+        }
+        items.append(ItemContext(
+            item_id=item_id,
+            category=category,
+            colors=colors,
+            attributes=attributes,
+        ))
 
-    for item in results:
-        item_id = item["image_id"]
-
-        cat = catalog.category_annotations.get(item_id, "")
-        if cat:
-            category_counter[cat] += 1
-
-        for color in catalog.color_annotations.get(item_id, []):
-            color_counter[color] += 1
-
-        for supercat, attrs in catalog.attribute_annotations.get(item_id, {}).items():
-            if supercat not in supercat_counters:
-                supercat_counters[supercat] = Counter()
-            for attr in attrs:
-                supercat_counters[supercat][attr] += 1
-
-    dominant_attributes = {
-        sc: counter.most_common(top_n)
-        for sc, counter in supercat_counters.items()
-        if counter
-    }
-
-    return GroundingContext(
-        total_results=len(results),
-        dominant_categories=category_counter.most_common(top_n),
-        dominant_colors=color_counter.most_common(top_n),
-        dominant_attributes=dominant_attributes,
-        is_diverse=len(category_counter) > 2,
-    )
+    return GroundingContext(total_results=len(results), items=items)
