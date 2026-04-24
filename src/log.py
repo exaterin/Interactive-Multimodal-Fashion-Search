@@ -1,0 +1,160 @@
+"""Terminal logging for the fashion search pipeline."""
+from __future__ import annotations
+
+import logging
+import sys
+from typing import Any
+
+# ANSI color codes
+_RESET = "\033[0m"
+_BOLD = "\033[1m"
+_DIM = "\033[2m"
+_CYAN = "\033[36m"
+_YELLOW = "\033[33m"
+_GREEN = "\033[32m"
+_MAGENTA = "\033[35m"
+_BLUE = "\033[34m"
+_RED = "\033[31m"
+_WHITE = "\033[37m"
+
+_WIDTH = 80
+
+
+class _PipelineFormatter(logging.Formatter):
+    def format(self, record: logging.LogRecord) -> str:
+        return record.getMessage()
+
+
+def _make_logger() -> logging.Logger:
+    logger = logging.getLogger("fashion_search")
+    if logger.handlers:
+        return logger
+    handler = logging.StreamHandler(sys.stderr)
+    handler.setFormatter(_PipelineFormatter())
+    logger.addHandler(handler)
+    logger.setLevel(logging.DEBUG)
+    logger.propagate = False
+    return logger
+
+
+_log = _make_logger()
+
+
+def _line(char: str = "─", color: str = _DIM) -> str:
+    return f"{color}{char * _WIDTH}{_RESET}"
+
+
+def _tag(name: str, color: str) -> str:
+    return f"{color}{_BOLD}[{name}]{_RESET}"
+
+
+# ── Public API ────────────────────────────────────────────────────────────────
+
+def turn_start(user_message: str) -> None:
+    _log.info(f"\n{_BOLD}{_CYAN}{'=' * _WIDTH}{_RESET}")
+    _log.info(f"{_BOLD}{_CYAN}TURN START{_RESET}  |  user: {_WHITE}\"{user_message}\"{_RESET}")
+    _log.info(f"{_BOLD}{_CYAN}{'=' * _WIDTH}{_RESET}")
+
+
+def turn_end() -> None:
+    _log.info(f"{_DIM}{'─' * _WIDTH}{_RESET}\n")
+
+
+def search_state(state: Any) -> None:
+    _log.info(f"\n{_tag('SEARCH STATE', _BLUE)}")
+    _log.info(f"  original : {state.original_query or '—'}")
+    _log.info(f"  query    : {state.current_query or '—'}")
+    _log.info(f"  category : {state.category or '—'}")
+    _log.info(f"  must have: {', '.join(state.positive_constraints) if state.positive_constraints else '—'}")
+    _log.info(f"  must not : {', '.join(state.negative_constraints) if state.negative_constraints else '—'}")
+    _log.info(f"  style    : {', '.join(state.style_tags) if state.style_tags else '—'}")
+    _log.info(f"  occasion : {state.occasion or '—'}")
+
+
+def retrieval(query: str, top_k: int) -> None:
+    _log.info(f"\n{_tag('RETRIEVAL', _GREEN)}  query={_WHITE}\"{query}\"{_RESET}  top_k={top_k}")
+
+
+def retrieval_done(count: int) -> None:
+    _log.info(f"{_tag('RETRIEVAL', _GREEN)}  found {_BOLD}{count}{_RESET} results")
+
+
+def grounding(context: Any) -> None:
+    _log.info(f"\n{_tag('GROUNDING', _YELLOW)}  {context.total_results} items total, "
+              f"{len(context.items)} in context")
+    from collections import Counter
+    cat_counter: Counter = Counter()
+    attr_counter: Counter = Counter()
+    for item in context.items:
+        if item.category:
+            cat_counter[item.category] += 1
+        for attrs in item.attributes.values():
+            for a in attrs:
+                attr_counter[a] += 1
+    if cat_counter:
+        top_cats = ", ".join(f"{c}({n})" for c, n in cat_counter.most_common(5))
+        _log.info(f"{_tag('GROUNDING', _YELLOW)}  top categories : {top_cats}")
+    if attr_counter:
+        top_attrs = ", ".join(f"{a}({n})" for a, n in attr_counter.most_common(8))
+        _log.info(f"{_tag('GROUNDING', _YELLOW)}  top attributes : {top_attrs}")
+
+
+def llm_prompt(system: str, user: str) -> None:
+    _log.info(f"\n{_tag('LLM PROMPT', _MAGENTA)}  {_line()}")
+    _log.info(f"{_DIM}--- SYSTEM ({len(system.splitlines())} lines) ---{_RESET}")
+    _log.info(f"{_DIM}{system}{_RESET}")
+    _log.info(f"{_DIM}--- USER ---{_RESET}")
+    _log.info(user)
+    _log.info(f"{_tag('LLM PROMPT END', _MAGENTA)}  {_line()}")
+
+
+def llm_raw(raw: str) -> None:
+    _log.info(f"\n{_tag('LLM RAW', _MAGENTA)}")
+    _log.info(raw)
+
+
+def llm_parsed(data: dict) -> None:
+    _log.info(f"\n{_tag('LLM PARSED', _GREEN)}")
+    _log.info(f"  intent      : {_BOLD}{data.get('intent', '—')}{_RESET}")
+    _log.info(f"  updated_query: {_WHITE}{data.get('updated_query', '—')}{_RESET}")
+    _log.info(f"  positive    : {data.get('positive_constraints', [])}")
+    _log.info(f"  negative    : {data.get('negative_constraints', [])}")
+    _log.info(f"  style_tags  : {data.get('style_tags', [])}")
+    _log.info(f"  category    : {data.get('category', '—')}")
+    _log.info(f"  occasion    : {data.get('occasion', '—')}")
+    suggestions = data.get('suggestions', [])
+    for i, s in enumerate(suggestions, 1):
+        _log.info(f"  suggestion {i}: {s}")
+    _log.info(f"  response    : {_CYAN}{data.get('response', '—')}{_RESET}")
+
+
+def llm_fallback(raw: str, error: str) -> None:
+    _log.info(f"\n{_tag('LLM FALLBACK', _RED)}  parse error: {error}")
+    _log.info(f"  raw: {raw[:300]}{'...' if len(raw) > 300 else ''}")
+
+
+def state_update(old_query: str, new_query: str, state: Any) -> None:
+    _log.info(f"\n{_tag('STATE UPDATE', _BLUE)}")
+    if new_query != old_query:
+        _log.info(f"  query : {_DIM}\"{old_query}\"{_RESET} → {_WHITE}\"{new_query}\"{_RESET}")
+    else:
+        _log.info(f"  query : unchanged (\"{new_query}\")")
+    _log.info(f"  category : {state.category or '—'}")
+    _log.info(f"  positive : {state.positive_constraints}")
+    _log.info(f"  negative : {state.negative_constraints}")
+
+
+def reretrieval(new_query: str) -> None:
+    _log.info(f"\n{_tag('RE-RETRIEVAL', _GREEN)}  query changed → re-fetching with: {_WHITE}\"{new_query}\"{_RESET}")
+
+
+def reretrieval_done(count: int) -> None:
+    _log.info(f"{_tag('RE-RETRIEVAL', _GREEN)}  found {_BOLD}{count}{_RESET} results")
+
+
+def feedback(context_str: str) -> None:
+    if not context_str:
+        return
+    _log.info(f"\n{_tag('RELEVANCE FEEDBACK', _YELLOW)}")
+    for line in context_str.splitlines():
+        _log.info(f"  {line}")

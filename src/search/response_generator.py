@@ -7,63 +7,11 @@ from typing import List, Tuple
 from src.conversation.llm_client import LLMClient
 from src.search.grounding_analyzer import GroundingContext
 from src.search.search_state import SearchState
+from src.prompts import load_prompt
+import src.log as log
 
 
-_SYSTEM_PROMPT = """\
-You are a grounded fashion search assistant helping users explore a clothing catalog.
-
-You have access to the ACTUAL results retrieved from the catalog for the current query.
-Your job is to:
-1. Understand the user's intent (initial search, refinement, constraint change, reset, etc.)
-2. Write a SHORT, helpful response (1-3 sentences) that references what was actually found.
-3. Propose 2-4 SPECIFIC, clickable refinement suggestions based ONLY on attributes/categories
-   that actually appear in the retrieved results.
-4. Produce an updated search query to use for the next retrieval.
-5. Return the COMPLETE active set of constraints and style_tags after this turn.
-   - Include previously active ones that are still relevant.
-   - Drop ones the user has removed or that are no longer relevant to the new direction.
-   - Add any new ones from the user's message.
-   - If none are active, return an empty list.
-
-Intent types:
-- initial_search        — first query about a new item
-- initial_specific      — first query already very specific (no clarification needed)
-- positive_refinement   — "more elegant", "I like floral", "show me fitted ones"
-- negative_refinement   — "not leather", "without floral", "less formal"
-- add_constraint        — "also in blue", "with short sleeves"
-- remove_constraint     — "remove the color filter", "forget the length"
-- style_or_occasion     — "for a wedding", "casual summer look"
-- browse_intent         — "show me more", "what else is there"
-- image_similarity      — user liked item(s) and triggered visual similarity search
-- reset                 — "start over", "new search", "forget everything"
-
-Rules:
-- Suggestions MUST be grounded in what the results actually contain. Never invent attributes.
-- For broad results with many categories: suggest narrowing by category or style.
-- For specific results: suggest small variations (length, color, pattern).
-- Do NOT ask vague questions like "what style do you prefer?".
-- If the query is already very specific and results look good, use fewer suggestions.
-- Keep the response warm but brief.
-- updated_query is used directly as a CLIP text embedding query. Make it as descriptive and attribute-rich as possible: include category, colors, materials, patterns, silhouette, length, and style keywords drawn from the active constraints and liked item attributes. Prefer dense noun phrases over short generic terms. Example: "fitted floral midi dress red navy v-neck cotton" beats "floral dress". The richer the query, the better CLIP retrieval quality.
-- For a reset intent: set updated_query to "" and suggestions to [] and all constraint lists to [].
-- For an image_similarity intent: write a warm 1-2 sentence response acknowledging the visual search. Extract the most distinctive shared attributes from the liked items provided in context and place them in positive_constraints — this grounds all future text searches in those visual preferences.
-- positive_constraints / negative_constraints / style_tags must always reflect the FULL active set after this turn, not just additions.
-
-Return ONLY a valid JSON object. Do not add markdown fences or extra text.
-
-Schema:
-{
-  "response": "string",
-  "suggestions": ["string", ...],
-  "updated_query": "string",
-  "intent": "string",
-  "category": "string or empty",
-  "positive_constraints": ["string", ...],
-  "negative_constraints": ["string", ...],
-  "style_tags": ["string", ...],
-  "occasion": "string or empty"
-}
-"""
+_SYSTEM_PROMPT = load_prompt("grounded_response")
 
 
 def generate_grounded_response(
@@ -94,12 +42,18 @@ def generate_grounded_response(
         {"role": "user", "content": user_content},
     ]
 
+    log.llm_prompt(_SYSTEM_PROMPT, user_content)
+
     raw = ""
     try:
         raw = llm_client.chat(messages)
+        log.llm_raw(raw)
+
         # Strip markdown code fences if the model wrapped the JSON
         cleaned = re.sub(r"```(?:json)?\s*", "", raw).strip().rstrip("`").strip()
         data = json.loads(cleaned)
+
+        log.llm_parsed(data)
 
         response = data.get("response", "").strip()
         suggestions = [s for s in data.get("suggestions", []) if s][:4]
@@ -107,7 +61,7 @@ def generate_grounded_response(
 
         return response, suggestions, updated_query, data
 
-    except (json.JSONDecodeError, Exception):
-        # Graceful fallback: show raw reply, no suggestions
+    except (json.JSONDecodeError, Exception) as exc:
+        log.llm_fallback(raw, str(exc))
         fallback_text = raw if raw else "I found some results. Let me know how you'd like to refine."
         return fallback_text, [], search_state.current_query, {}

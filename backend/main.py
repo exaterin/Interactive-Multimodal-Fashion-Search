@@ -37,6 +37,7 @@ from src.search.grounding_analyzer import analyze_results
 from src.search.relevance_feedback import FeedbackItem, build_feedback_context
 from src.search.response_generator import generate_grounded_response
 from src.search.search_state import SearchState as _SearchState
+import src.log as log
 
 
 # ── Pydantic models (API contract) ────────────────────────────────────────────
@@ -174,34 +175,27 @@ async def chat(req: ChatRequest) -> ChatResponseSchema:
     # Use current_query for retrieval if we already have one; else raw message
     retrieval_query = search_state.current_query or req.message
 
-    print(f"\n{'='*60}")
-    print(f"[SEARCH] Message: {req.message!r}")
-    print(f"[SEARCH] Retrieval query: {retrieval_query!r}")
-    print(f"[STATE] original_query:        {search_state.original_query!r}")
-    print(f"[STATE] current_query:         {search_state.current_query!r}")
-    print(f"[STATE] positive_constraints:  {search_state.positive_constraints}")
-    print(f"[STATE] negative_constraints:  {search_state.negative_constraints}")
-    print(f"[STATE] style_tags:            {search_state.style_tags}")
-    print(f"[STATE] occasion:              {search_state.occasion!r}")
-    print(f"[STATE] budget:                {search_state.budget!r}")
-    print(f"{'='*60}\n")
+    log.turn_start(req.message)
+    log.search_state(search_state)
 
     # 1. Retrieve
     feedback_items = _to_feedback_items(req.liked_items)
+    log.retrieval(retrieval_query, 200)
     results = search_clip_fp(
         catalog=_catalog,
         encoder=_encoder,
         query_text=retrieval_query,
         top_k=200,
     )
+    log.retrieval_done(len(results))
 
     # 2. Grounding analysis
     grounding = analyze_results(results, _catalog)
-
-    print(grounding)
+    log.grounding(grounding)
 
     # 3. LLM response
     liked_context = build_feedback_context(feedback_items)
+    log.feedback(liked_context)
     response_text, suggestions, updated_query, llm_data = generate_grounded_response(
         user_message=req.message,
         search_state=search_state,
@@ -217,26 +211,20 @@ async def chat(req: ChatRequest) -> ChatResponseSchema:
     search_state.last_suggestions = suggestions
     search_state.update_from_llm(llm_data)
 
-    print(f"\n{'='*60}")
-    print(f"[STATE UPDATED] original_query:       {search_state.original_query!r}")
-    print(f"[STATE UPDATED] current_query:        {search_state.current_query!r}")
-    print(f"[STATE UPDATED] positive_constraints: {search_state.positive_constraints}")
-    print(f"[STATE UPDATED] negative_constraints: {search_state.negative_constraints}")
-    print(f"[STATE UPDATED] style_tags:           {search_state.style_tags}")
-    print(f"[STATE UPDATED] occasion:             {search_state.occasion!r}")
-    print(f"[STATE UPDATED] budget:               {search_state.budget!r}")
-    if updated_query:
-        print(f"[QUERY REFINED] {retrieval_query!r} → {updated_query!r}")
-    print(f"{'='*60}\n")
+    log.state_update(retrieval_query, search_state.current_query, search_state)
 
     # 5. Re-retrieve with refined text query
     if updated_query and updated_query != retrieval_query:
+        log.reretrieval(updated_query)
         results = search_clip_fp(
             catalog=_catalog,
             encoder=_encoder,
             query_text=updated_query,
             top_k=200,
         )
+        log.reretrieval_done(len(results))
+
+    log.turn_end()
 
     # 6. Build product list
     products: List[ProductSchema] = []

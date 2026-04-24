@@ -9,6 +9,7 @@ from src.conversation.llm_client import LLMClient
 from src.search.search_state import SearchState
 from src.search.grounding_analyzer import GroundingContext, analyze_results
 from src.search.response_generator import generate_grounded_response
+import src.log as log
 
 
 # Session state keys
@@ -76,6 +77,9 @@ def _run_pipeline(
     """
     search_state: SearchState = st.session_state[_STATE_KEY]
 
+    log.turn_start(user_message)
+    log.search_state(search_state)
+
     query = search_state.current_query if search_state.current_query else user_message
 
     # Retrieval
@@ -90,19 +94,22 @@ def _run_pipeline(
 
     from src.retrieval.fashionpedia_retriever import search_clip_fp
 
+    log.retrieval(query, top_k)
     results = search_clip_fp(
         catalog=catalog,
         encoder=encoder,
         query_text=query,
         top_k=top_k,
     )
+    log.retrieval_done(len(results))
 
     st.session_state[_RESULTS_KEY] = {"results": results, "catalog": catalog}
 
     # Grounding analysis
     grounding: GroundingContext = analyze_results(results, catalog)
+    log.grounding(grounding)
 
-    # LLM response 
+    # LLM response
     response, suggestions, updated_query, llm_data = generate_grounded_response(
         user_message=user_message,
         search_state=search_state,
@@ -110,12 +117,14 @@ def _run_pipeline(
         llm_client=llm_client,
     )
 
-    # Update search state 
+    # Update search state
+    old_query = query
     if not search_state.original_query:
         search_state.original_query = user_message
     search_state.current_query = updated_query or query
     search_state.last_suggestions = suggestions
     search_state.update_from_llm(llm_data)
+    log.state_update(old_query, search_state.current_query, search_state)
 
     # If the LLM signalled a reset, wipe history and re-init
     if llm_data.get("intent") == "reset":
@@ -127,14 +136,17 @@ def _run_pipeline(
 
     # Re-run retrieval with the refined query if it changed meaningfully
     if updated_query and updated_query != query:
+        log.reretrieval(updated_query)
         results = search_clip_fp(
             catalog=catalog,
             encoder=encoder,
             query_text=updated_query,
             top_k=top_k,
         )
+        log.reretrieval_done(len(results))
         st.session_state[_RESULTS_KEY] = {"results": results, "catalog": catalog}
 
+    log.turn_end()
     return response, suggestions
 
 
