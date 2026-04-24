@@ -1,12 +1,13 @@
 import json
-from typing import List, Dict
+from typing import Any, Dict, List, Union
 
 import requests
 
 from src.config import OPENROUTER_API_KEY, OPENROUTER_URL
 
 
-Message = Dict[str, str]
+# content may be a plain string (text-only) or a list of content blocks (multimodal)
+Message = Dict[str, Union[str, List[Dict[str, Any]]]]
 
 
 class LLMClient:

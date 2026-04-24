@@ -44,7 +44,7 @@ export interface ChatRequest {
   search_state: SearchState;
   liked_items?: LikedItem[];
   use_image_similarity?: boolean;
-  grounding_mode?: "attribute" | "image";
+  grounding_mode?: "attribute" | "description" | "image";
 }
 
 /** Shape returned by POST /api/chat */

@@ -33,8 +33,8 @@ from src.conversation.llm_client import LLMClient
 from src.data.fashionpedia.loaders import load_fashionpedia_catalog
 from src.models.fashion_clip_encoder import build_fashion_clip_encoder
 from src.retrieval.fashionpedia_retriever import search_clip_fp
-from src.search.grounding_analyzer import analyze_results
-from src.search.relevance_feedback import FeedbackItem, build_feedback_context
+from src.search.grounding import build_grounding_context, GroundingStrategy
+from src.search.relevance_feedback import FeedbackItem
 from src.search.response_generator import generate_grounded_response
 from src.search.search_state import SearchState as _SearchState
 import src.log as log
@@ -62,6 +62,7 @@ class ChatRequest(BaseModel):
     message: str
     search_state: SearchStateSchema
     liked_items: List[LikedItemSchema] = []
+    grounding_mode: str = "attribute"
 
 
 class ProductSchema(BaseModel):
@@ -119,7 +120,12 @@ def _load_and_crop_image(item_id: str, image_path_str: str, bbox_tuple: Optional
     img = Image.open(image_path_str).convert("RGB")
     if bbox_tuple:
         x, y, w, h = (int(v) for v in bbox_tuple)
-        img = img.crop((x, y, x + w, y + h))
+        pad_x, pad_y = int(w * 0.15), int(h * 0.15)
+        x1 = max(0, x - pad_x)
+        y1 = max(0, y - pad_y)
+        x2 = min(img.width, x + w + pad_x)
+        y2 = min(img.height, y + h + pad_y)
+        img = img.crop((x1, y1, x2, y2))
     buf = io.BytesIO()
     img.save(buf, format="JPEG", quality=85, optimize=True)
     return buf.getvalue()
@@ -189,19 +195,18 @@ async def chat(req: ChatRequest) -> ChatResponseSchema:
     )
     log.retrieval_done(len(results))
 
-    # 2. Grounding analysis
-    grounding = analyze_results(results, _catalog)
+    # 2. Grounding analysis (feedback folded in when provided)
+    strategy = GroundingStrategy(req.grounding_mode) if req.grounding_mode in GroundingStrategy._value2member_map_ else GroundingStrategy.ATTRIBUTE
+    grounding = build_grounding_context(results, _catalog, feedback_items=feedback_items, strategy=strategy)
     log.grounding(grounding)
+    log.feedback(grounding.feedback_context)
 
     # 3. LLM response
-    liked_context = build_feedback_context(feedback_items)
-    log.feedback(liked_context)
     response_text, suggestions, updated_query, llm_data = generate_grounded_response(
         user_message=req.message,
         search_state=search_state,
         grounding_context=grounding,
         llm_client=_llm_client,
-        liked_context=liked_context,
     )
 
     # 4. Update state

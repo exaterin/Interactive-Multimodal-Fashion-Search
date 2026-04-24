@@ -12,8 +12,8 @@ interface UseFashionSearch {
   isLoading: boolean;
   error: string | null;
   likedProducts: Map<string, Product>;
-  groundingMode: "attribute" | "image";
-  setGroundingMode: (mode: "attribute" | "image") => void;
+  groundingMode: "attribute" | "description" | "image";
+  setGroundingMode: (mode: "attribute" | "description" | "image") => void;
   sendMessage: (text: string) => Promise<void>;
   findSimilar: () => Promise<void>;
   clearChat: () => void;
@@ -32,7 +32,7 @@ export function useFashionSearch(): UseFashionSearch {
   const [likedProducts, setLikedProducts] = useState<Map<string, Product>>(
     new Map()
   );
-  const [groundingMode, setGroundingMode] = useState<"attribute" | "image">(
+  const [groundingMode, setGroundingMode] = useState<"attribute" | "description" | "image">(
     "attribute"
   );
 

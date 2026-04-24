@@ -9,8 +9,8 @@ import type { Message } from "@/types";
 interface ChatPanelProps {
   messages: Message[];
   isLoading: boolean;
-  groundingMode: "attribute" | "image";
-  onGroundingModeChange: (mode: "attribute" | "image") => void;
+  groundingMode: "attribute" | "description" | "image";
+  onGroundingModeChange: (mode: "attribute" | "description" | "image") => void;
   onSend: (text: string) => void;
   onClear: () => void;
 }
@@ -49,7 +49,13 @@ export function ChatPanel({
       {/* Grounding mode toggle */}
       <div className="flex items-center gap-1 px-4 py-2 border-b border-gray-100 bg-gray-50">
         <span className="text-[11px] text-gray-400 mr-1">Grounding:</span>
-        {(["attribute", "image"] as const).map((mode) => (
+        {(
+          [
+            { mode: "attribute", label: "Attribute-based" },
+            { mode: "description", label: "Description-based" },
+            { mode: "image", label: "Image-based" },
+          ] as const
+        ).map(({ mode, label }) => (
           <button
             key={mode}
             onClick={() => onGroundingModeChange(mode)}
@@ -60,7 +66,7 @@ export function ChatPanel({
                 : "bg-white text-gray-500 border border-gray-200 hover:border-gray-400 hover:text-gray-700"
             }`}
           >
-            {mode === "attribute" ? "Attribute-based" : "Image-based"}
+            {label}
           </button>
         ))}
       </div>

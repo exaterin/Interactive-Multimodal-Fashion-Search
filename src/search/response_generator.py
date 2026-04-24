@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import json
 import re
-from typing import List, Tuple
+from typing import List, Tuple, Union
 
 from src.conversation.llm_client import LLMClient
-from src.search.grounding_analyzer import GroundingContext
+from src.search.grounding import GroundingContext
 from src.search.search_state import SearchState
 from src.prompts import load_prompt
 import src.log as log
@@ -19,30 +19,44 @@ def generate_grounded_response(
     search_state: SearchState,
     grounding_context: GroundingContext,
     llm_client: LLMClient,
-    liked_context: str = "",
 ) -> Tuple[str, List[str], str, dict]:
     """
     Generate a grounded assistant response using actual retrieval context.
 
+    Relevance feedback, when present, is embedded in grounding_context.feedback_context
+    and included automatically in the LLM prompt.
+
     Returns:
         (response_text, suggestions, updated_query, raw_llm_data)
     """
-    liked_section = f"\n\n{liked_context}" if liked_context else ""
-    user_content = (
-        f"Current search state:\n{search_state.to_context_str()}\n\n"
-        f"What was actually retrieved from the catalog:\n"
-        f"{grounding_context.to_prompt_str()}"
-        f"{liked_section}\n\n"
-        f"User's message: \"{user_message}\"\n\n"
-        f"Respond using ONLY information present in the retrieved results above."
+    state_section = f"Current search state:\n{search_state.to_context_str()}\n\n"
+    instruction = (
+        f"\n\nUser's message: \"{user_message}\"\n\n"
+        "Respond using ONLY information present in the retrieved results above."
     )
+
+    if grounding_context.is_multimodal:
+        user_content: Union[str, list] = [
+            {"type": "text", "text": state_section + "What was actually retrieved from the catalog:"},
+            *grounding_context.to_multimodal_blocks(),
+            {"type": "text", "text": instruction},
+        ]
+        log_user = "[multimodal content]"
+    else:
+        user_content = (
+            state_section
+            + "What was actually retrieved from the catalog:\n"
+            + grounding_context.to_prompt_str()
+            + instruction
+        )
+        log_user = user_content
 
     messages = [
         {"role": "system", "content": _SYSTEM_PROMPT},
         {"role": "user", "content": user_content},
     ]
 
-    log.llm_prompt(_SYSTEM_PROMPT, user_content)
+    log.llm_prompt(_SYSTEM_PROMPT, log_user)
 
     raw = ""
     try:
