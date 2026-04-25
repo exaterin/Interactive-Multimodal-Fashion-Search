@@ -19,6 +19,7 @@ def generate_grounded_response(
     search_state: SearchState,
     grounding_context: GroundingContext,
     llm_client: LLMClient,
+    chat_history: List[dict] = None,
 ) -> Tuple[str, List[str], str, dict]:
     """
     Generate a grounded assistant response using actual retrieval context.
@@ -36,25 +37,25 @@ def generate_grounded_response(
     )
 
     if grounding_context.is_multimodal:
-        user_content: Union[str, list] = [
+        current_user_content: Union[str, list] = [
             {"type": "text", "text": state_section + "What was actually retrieved from the catalog:"},
             *grounding_context.to_multimodal_blocks(),
             {"type": "text", "text": instruction},
         ]
         log_user = "[multimodal content]"
     else:
-        user_content = (
+        current_user_content = (
             state_section
             + "What was actually retrieved from the catalog:\n"
             + grounding_context.to_prompt_str()
             + instruction
         )
-        log_user = user_content
+        log_user = current_user_content
 
-    messages = [
-        {"role": "system", "content": _SYSTEM_PROMPT},
-        {"role": "user", "content": user_content},
-    ]
+    messages = [{"role": "system", "content": _SYSTEM_PROMPT}]
+    for msg in (chat_history or []):
+        messages.append({"role": msg["role"], "content": msg["content"]})
+    messages.append({"role": "user", "content": current_user_content})
 
     log.llm_prompt(_SYSTEM_PROMPT, log_user)
 

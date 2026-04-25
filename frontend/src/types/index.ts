@@ -59,4 +59,5 @@ export interface ChatResponse {
   suggestions: string[];
   products: Product[];
   search_state: SearchState;
+  intent?: string;
 }

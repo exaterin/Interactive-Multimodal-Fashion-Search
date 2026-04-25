@@ -58,11 +58,17 @@ class LikedItemSchema(BaseModel):
     attributes: Optional[Dict[str, List[str]]] = None
 
 
+class HistoryMessageSchema(BaseModel):
+    role: str
+    content: str
+
+
 class ChatRequest(BaseModel):
     message: str
     search_state: SearchStateSchema
     liked_items: List[LikedItemSchema] = []
     grounding_mode: str = "attribute"
+    chat_history: List[HistoryMessageSchema] = []
 
 
 class ProductSchema(BaseModel):
@@ -78,6 +84,7 @@ class ChatResponseSchema(BaseModel):
     suggestions: List[str]
     products: List[ProductSchema]
     search_state: SearchStateSchema
+    intent: str = ""
 
 
 # ── State converters ──────────────────────────────────────────────────────────
@@ -181,17 +188,20 @@ async def chat(req: ChatRequest) -> ChatResponseSchema:
     # Use current_query for retrieval if we already have one; else raw message
     retrieval_query = search_state.current_query or req.message
 
+    history = [{"role": m.role, "content": m.content} for m in req.chat_history]
+
     log.turn_start(req.message)
     log.search_state(search_state)
+    log.chat_history(history)
 
     # 1. Retrieve
     feedback_items = _to_feedback_items(req.liked_items)
-    log.retrieval(retrieval_query, 200)
+    log.retrieval(retrieval_query, 1000)
     results = search_clip_fp(
         catalog=_catalog,
         encoder=_encoder,
         query_text=retrieval_query,
-        top_k=200,
+        top_k=1000,
     )
     log.retrieval_done(len(results))
 
@@ -207,25 +217,30 @@ async def chat(req: ChatRequest) -> ChatResponseSchema:
         search_state=search_state,
         grounding_context=grounding,
         llm_client=_llm_client,
+        chat_history=history,
     )
 
     # 4. Update state
-    if not search_state.original_query:
-        search_state.original_query = req.message
-    search_state.current_query = updated_query or retrieval_query
-    search_state.last_suggestions = suggestions
-    search_state.update_from_llm(llm_data)
+    intent = llm_data.get("intent", "")
+    if intent == "reset":
+        search_state.reset()
+    else:
+        if not search_state.original_query:
+            search_state.original_query = req.message
+        search_state.current_query = updated_query or retrieval_query
+        search_state.last_suggestions = suggestions
+        search_state.update_from_llm(llm_data)
 
     log.state_update(retrieval_query, search_state.current_query, search_state)
 
     # 5. Re-retrieve with refined text query
-    if updated_query and updated_query != retrieval_query:
+    if intent != "reset" and updated_query and updated_query != retrieval_query:
         log.reretrieval(updated_query)
         results = search_clip_fp(
             catalog=_catalog,
             encoder=_encoder,
             query_text=updated_query,
-            top_k=200,
+            top_k=1000,
         )
         log.reretrieval_done(len(results))
 
@@ -259,6 +274,7 @@ async def chat(req: ChatRequest) -> ChatResponseSchema:
         suggestions=suggestions,
         products=products,
         search_state=_from_dataclass(search_state),
+        intent=intent,
     )
 
 

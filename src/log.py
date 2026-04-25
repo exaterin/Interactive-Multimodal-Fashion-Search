@@ -71,6 +71,20 @@ def search_state(state: Any) -> None:
     _log.info(f"  occasion : {state.occasion or '—'}")
 
 
+def chat_history(history: list) -> None:
+    if not history:
+        return
+    _log.info(f"\n{_tag('CHAT HISTORY', _CYAN)}  {len(history)} message(s)")
+    for msg in history:
+        role = msg.get("role", "?")
+        content = msg.get("content", "")
+        preview = content[:120].replace("\n", " ")
+        if len(content) > 120:
+            preview += "…"
+        color = _WHITE if role == "user" else _DIM
+        _log.info(f"  {_BOLD}{role:9}{_RESET} {color}{preview}{_RESET}")
+
+
 def retrieval(query: str, top_k: int) -> None:
     _log.info(f"\n{_tag('RETRIEVAL', _GREEN)}  query={_WHITE}\"{query}\"{_RESET}  top_k={top_k}")
 
