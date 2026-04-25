@@ -8,6 +8,9 @@ export default function Home() {
   const {
     messages,
     products,
+    visibleProducts,
+    hasMore,
+    showMore,
     searchState,
     isLoading,
     likedProducts,
@@ -39,7 +42,10 @@ export default function Home() {
       {/* ── Right: Results ── */}
       <div className="flex-1 flex flex-col min-w-0">
         <ResultsGrid
-          products={products}
+          products={visibleProducts}
+          totalProducts={products.length}
+          hasMore={hasMore}
+          onShowMore={showMore}
           searchState={searchState}
           isLoading={isLoading}
           likedId={likedId}

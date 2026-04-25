@@ -8,6 +8,9 @@ import type { Product, SearchState } from "@/types";
 
 interface ResultsGridProps {
   products: Product[];
+  totalProducts: number;
+  hasMore: boolean;
+  onShowMore: () => void;
   searchState: SearchState;
   isLoading: boolean;
   likedId: string | null;
@@ -18,6 +21,9 @@ interface ResultsGridProps {
 
 export function ResultsGrid({
   products,
+  totalProducts,
+  hasMore,
+  onShowMore,
   searchState,
   isLoading,
   likedId,
@@ -35,7 +41,11 @@ export function ResultsGrid({
         <div className="flex items-center justify-between">
           <h2 className="text-sm font-semibold text-gray-900">Results</h2>
           {hasResults && (
-            <span className="text-xs text-gray-400">{products.length} items</span>
+            <span className="text-xs text-gray-400">
+              {products.length === totalProducts
+                ? `${totalProducts} items`
+                : `${products.length} of ${totalProducts} items`}
+            </span>
           )}
         </div>
 
@@ -91,13 +101,25 @@ export function ResultsGrid({
             <p className="text-xs text-gray-400 mt-1">Try a broader query.</p>
           </div>
         ) : (
-          <ProductGrid
-            products={products}
-            isLoading={isLoading}
-            likedId={likedId}
-            onToggleLike={onToggleLike}
-            onFindSimilar={onFindSimilar}
-          />
+          <>
+            <ProductGrid
+              products={products}
+              isLoading={isLoading}
+              likedId={likedId}
+              onToggleLike={onToggleLike}
+              onFindSimilar={onFindSimilar}
+            />
+            {hasMore && (
+              <div className="flex justify-center pt-6 pb-2">
+                <button
+                  onClick={onShowMore}
+                  className="px-5 py-2 rounded-lg border border-gray-200 text-sm font-medium text-gray-600 hover:bg-gray-50 hover:border-gray-300 transition-colors"
+                >
+                  Show 200 more
+                </button>
+              </div>
+            )}
+          </>
         )}
       </div>
     </div>

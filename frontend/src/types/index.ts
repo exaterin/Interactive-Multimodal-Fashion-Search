@@ -38,6 +38,11 @@ export interface SearchState {
 
 // ── API contract ──────────────────────────────────────────────────────────────
 
+export interface HistoryMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
 /** Body sent to POST /api/chat */
 export interface ChatRequest {
   message: string;
@@ -45,6 +50,7 @@ export interface ChatRequest {
   liked_items?: LikedItem[];
   use_image_similarity?: boolean;
   grounding_mode?: "attribute" | "description" | "image";
+  chat_history?: HistoryMessage[];
 }
 
 /** Shape returned by POST /api/chat */

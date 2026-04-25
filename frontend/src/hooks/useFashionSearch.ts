@@ -3,11 +3,14 @@
 import { useState, useCallback } from "react";
 import { sendChatMessage, resetChat } from "@/lib/api";
 import { makeId, initialSearchState } from "@/lib/utils";
-import type { Message, Product, SearchState, LikedItem } from "@/types";
+import type { Message, Product, SearchState, LikedItem, HistoryMessage } from "@/types";
 
 interface UseFashionSearch {
   messages: Message[];
   products: Product[];
+  visibleProducts: Product[];
+  hasMore: boolean;
+  showMore: () => void;
   searchState: SearchState;
   isLoading: boolean;
   error: string | null;
@@ -24,6 +27,7 @@ interface UseFashionSearch {
 export function useFashionSearch(): UseFashionSearch {
   const [messages, setMessages] = useState<Message[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
+  const [visibleCount, setVisibleCount] = useState(200);
   const [searchState, setSearchState] = useState<SearchState>(
     initialSearchState()
   );
@@ -35,6 +39,13 @@ export function useFashionSearch(): UseFashionSearch {
   const [groundingMode, setGroundingMode] = useState<"attribute" | "description" | "image">(
     "attribute"
   );
+
+  const visibleProducts = products.slice(0, visibleCount);
+  const hasMore = visibleCount < products.length;
+
+  const showMore = useCallback(() => {
+    setVisibleCount((prev) => prev + 200);
+  }, []);
 
   const toggleLike = useCallback((product: Product) => {
     setLikedProducts((prev) => {
@@ -54,6 +65,9 @@ export function useFashionSearch(): UseFashionSearch {
       category: p.category,
       attributes: p.attributes,
     }));
+
+  const _buildHistory = (msgs: Message[]): HistoryMessage[] =>
+    msgs.map((m) => ({ role: m.role, content: m.content }));
 
   const sendMessage = useCallback(
     async (text: string) => {
@@ -75,6 +89,7 @@ export function useFashionSearch(): UseFashionSearch {
           search_state: searchState,
           liked_items: _buildLikedItems(likedProducts),
           grounding_mode: groundingMode,
+          chat_history: _buildHistory(messages),
         });
 
         const assistantMsg: Message = {
@@ -87,6 +102,7 @@ export function useFashionSearch(): UseFashionSearch {
 
         setMessages((prev) => [...prev, assistantMsg]);
         setProducts(response.products ?? []);
+        setVisibleCount(200);
         setSearchState(response.search_state ?? searchState);
       } catch (err) {
         const message = err instanceof Error ? err.message : "Unexpected error";
@@ -130,6 +146,7 @@ export function useFashionSearch(): UseFashionSearch {
         liked_items: _buildLikedItems(likedProducts),
         use_image_similarity: true,
         grounding_mode: groundingMode,
+        chat_history: _buildHistory(messages),
       });
 
       setMessages((prev) => [
@@ -143,6 +160,7 @@ export function useFashionSearch(): UseFashionSearch {
         },
       ]);
       setProducts(response.products ?? []);
+      setVisibleCount(200);
       setSearchState(response.search_state ?? searchState);
       setLikedProducts(new Map()); // clear after successful search
     } catch (err) {
@@ -166,6 +184,7 @@ export function useFashionSearch(): UseFashionSearch {
     resetChat().catch(() => null);
     setMessages([]);
     setProducts([]);
+    setVisibleCount(200);
     setSearchState(initialSearchState());
     setError(null);
     setLikedProducts(new Map());
@@ -199,6 +218,7 @@ export function useFashionSearch(): UseFashionSearch {
           search_state: updatedState,
           liked_items: _buildLikedItems(likedProducts),
           grounding_mode: groundingMode,
+          chat_history: _buildHistory(messages),
         });
 
         setMessages((prev) => [
@@ -212,6 +232,7 @@ export function useFashionSearch(): UseFashionSearch {
           },
         ]);
         setProducts(response.products ?? []);
+        setVisibleCount(200);
         setSearchState(response.search_state ?? updatedState);
       } catch (err) {
         const message = err instanceof Error ? err.message : "Unexpected error";
@@ -235,6 +256,9 @@ export function useFashionSearch(): UseFashionSearch {
   return {
     messages,
     products,
+    visibleProducts,
+    hasMore,
+    showMore,
     searchState,
     isLoading,
     error,
