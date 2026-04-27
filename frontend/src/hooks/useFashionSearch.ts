@@ -92,6 +92,15 @@ export function useFashionSearch(): UseFashionSearch {
           chat_history: _buildHistory(messages),
         });
 
+        if (response.intent === "reset") {
+          setMessages([]);
+          setProducts([]);
+          setVisibleCount(200);
+          setSearchState(initialSearchState());
+          setLikedProducts(new Map());
+          return;
+        }
+
         const assistantMsg: Message = {
           id: makeId(),
           role: "assistant",
@@ -100,7 +109,7 @@ export function useFashionSearch(): UseFashionSearch {
           timestamp: new Date(),
         };
 
-        const clearsHistory = response.intent === "reset" || response.intent === "initial_search";
+        const clearsHistory = response.intent === "initial_search";
         setMessages(clearsHistory ? [userMsg, assistantMsg] : (prev) => [...prev, assistantMsg]);
         setProducts(response.products ?? []);
         setVisibleCount(200);

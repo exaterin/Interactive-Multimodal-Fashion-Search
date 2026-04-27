@@ -93,13 +93,13 @@ def retrieval_done(count: int) -> None:
     _log.info(f"{_tag('RETRIEVAL', _GREEN)}  found {_BOLD}{count}{_RESET} results")
 
 
-def grounding(context: Any) -> None:
-    _log.info(f"\n{_tag('GROUNDING', _YELLOW)}  {context.total_results} items total, "
-              f"{len(context.items)} in context")
+def catalog_evidence(evidence: Any) -> None:
+    _log.info(f"\n{_tag('CATALOG EVIDENCE', _YELLOW)}  {evidence.total_results} items total, "
+              f"{len(evidence.items)} in context")
     from collections import Counter
     cat_counter: Counter = Counter()
     attr_counter: Counter = Counter()
-    for item in context.items:
+    for item in evidence.items:
         if item.category:
             cat_counter[item.category] += 1
         for attrs in item.attributes.values():
@@ -107,10 +107,46 @@ def grounding(context: Any) -> None:
                 attr_counter[a] += 1
     if cat_counter:
         top_cats = ", ".join(f"{c}({n})" for c, n in cat_counter.most_common(5))
-        _log.info(f"{_tag('GROUNDING', _YELLOW)}  top categories : {top_cats}")
+        _log.info(f"{_tag('CATALOG EVIDENCE', _YELLOW)}  top categories : {top_cats}")
     if attr_counter:
         top_attrs = ", ".join(f"{a}({n})" for a, n in attr_counter.most_common(8))
-        _log.info(f"{_tag('GROUNDING', _YELLOW)}  top attributes : {top_attrs}")
+        _log.info(f"{_tag('CATALOG EVIDENCE', _YELLOW)}  top attributes : {top_attrs}")
+
+
+def preference_evidence(evidence: Any) -> None:
+    if not evidence.items:
+        return
+    mode = "multimodal" if evidence.is_multimodal else "text"
+    _log.info(f"\n{_tag('PREFERENCE EVIDENCE', _YELLOW)}  {len(evidence.items)} liked item(s), "
+              f"strategy={mode}")
+    for i, item in enumerate(evidence.items, 1):
+        bits = [f"item {i}: id={item.item_id}"]
+        if item.category:
+            bits.append(f"category={item.category}")
+        if item.colors:
+            bits.append(f"colors={','.join(item.colors)}")
+        attr_count = sum(len(v) for v in item.attributes.values())
+        if attr_count:
+            bits.append(f"attrs={attr_count}")
+        _log.info(f"  {' | '.join(bits)}")
+
+
+def query_rewrite_prompt(user_content: str) -> None:
+    _log.info(f"\n{_tag('QUERY REWRITER', _MAGENTA)}  prompt:")
+    for line in user_content.splitlines():
+        _log.info(f"  {_DIM}{line}{_RESET}")
+
+
+def query_rewrite_result(result: Any, raw: str) -> None:
+    _log.info(f"{_tag('QUERY REWRITER', _MAGENTA)}  "
+              f"reset={_BOLD}{result.reset}{_RESET}  "
+              f"query={_WHITE}\"{result.query}\"{_RESET}")
+
+
+def query_rewrite_fallback(raw: str, error: str, fallback: Any) -> None:
+    _log.info(f"\n{_tag('QUERY REWRITER FALLBACK', _RED)}  parse error: {error}")
+    _log.info(f"  raw: {raw[:200]}{'...' if len(raw) > 200 else ''}")
+    _log.info(f"  → using query=\"{fallback.query}\" reset={fallback.reset}")
 
 
 def llm_prompt(system: str, user: str) -> None:
@@ -130,7 +166,6 @@ def llm_raw(raw: str) -> None:
 def llm_parsed(data: dict) -> None:
     _log.info(f"\n{_tag('LLM PARSED', _GREEN)}")
     _log.info(f"  intent      : {_BOLD}{data.get('intent', '—')}{_RESET}")
-    _log.info(f"  updated_query: {_WHITE}{data.get('updated_query', '—')}{_RESET}")
     _log.info(f"  positive    : {data.get('positive_constraints', [])}")
     _log.info(f"  negative    : {data.get('negative_constraints', [])}")
     _log.info(f"  style_tags  : {data.get('style_tags', [])}")
@@ -158,17 +193,3 @@ def state_update(old_query: str, new_query: str, state: Any) -> None:
     _log.info(f"  negative : {state.negative_constraints}")
 
 
-def reretrieval(new_query: str) -> None:
-    _log.info(f"\n{_tag('RE-RETRIEVAL', _GREEN)}  query changed → re-fetching with: {_WHITE}\"{new_query}\"{_RESET}")
-
-
-def reretrieval_done(count: int) -> None:
-    _log.info(f"{_tag('RE-RETRIEVAL', _GREEN)}  found {_BOLD}{count}{_RESET} results")
-
-
-def feedback(context_str: str) -> None:
-    if not context_str:
-        return
-    _log.info(f"\n{_tag('RELEVANCE FEEDBACK', _YELLOW)}")
-    for line in context_str.splitlines():
-        _log.info(f"  {line}")

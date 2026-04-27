@@ -1,8 +1,16 @@
 """
 FastAPI backend for the Fashion Search chatbot.
 
+Two-LLM pipeline per /chat call:
+  1. Query Rewriter LLM     — (search_state + user message) → rewritten retrieval query
+  2. Multimodal Retriever   — top-k items for that query
+  3. Catalog Evidence       — items + Context Extraction (Attributes/Descriptions/Images)
+  4. Preference Evidence    — liked items + same Context Extraction
+  5. Prompt Orchestration   — bundles state + catalog ev + preference ev
+  6. Final Responder LLM    — conversational response, suggestions, intent, constraints, style
+
 Endpoints:
-  POST   /chat          — retrieval + grounding + LLM response
+  POST   /chat          — runs the pipeline above
   DELETE /reset         — no-op (state lives in the frontend)
   GET    /images/{id}   — serve a bbox-cropped Fashionpedia image as JPEG
 """
@@ -33,8 +41,10 @@ from src.conversation.llm_client import LLMClient
 from src.data.fashionpedia.loaders import load_fashionpedia_catalog
 from src.models.fashion_clip_encoder import build_fashion_clip_encoder
 from src.retrieval.fashionpedia_retriever import search_clip_fp
-from src.search.grounding import build_grounding_context, GroundingStrategy
-from src.search.relevance_feedback import FeedbackItem
+from src.search.catalog_evidence import build_catalog_evidence
+from src.search.context_extraction import parse_strategy
+from src.search.preference_evidence import PreferenceItem, build_preference_evidence
+from src.search.query_rewriter import rewrite_query
 from src.search.response_generator import generate_grounded_response
 from src.search.search_state import SearchState as _SearchState
 import src.log as log
@@ -170,9 +180,9 @@ app.add_middleware(
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
-def _to_feedback_items(liked_items: List[LikedItemSchema]) -> List[FeedbackItem]:
+def _to_preference_items(liked_items: List[LikedItemSchema]) -> List[PreferenceItem]:
     return [
-        FeedbackItem(
+        PreferenceItem(
             id=item.id,
             category=item.category or "",
             attributes=dict(item.attributes or {}),
@@ -184,18 +194,41 @@ def _to_feedback_items(liked_items: List[LikedItemSchema]) -> List[FeedbackItem]
 @app.post("/chat", response_model=ChatResponseSchema)
 async def chat(req: ChatRequest) -> ChatResponseSchema:
     search_state = _to_dataclass(req.search_state)
-
-    # Use current_query for retrieval if we already have one; else raw message
-    retrieval_query = search_state.current_query or req.message
-
     history = [{"role": m.role, "content": m.content} for m in req.chat_history]
+    strategy = parse_strategy(req.grounding_mode)
 
     log.turn_start(req.message)
     log.search_state(search_state)
     log.chat_history(history)
 
-    # 1. Retrieve
-    feedback_items = _to_feedback_items(req.liked_items)
+    # 1. Query Rewriter (LLM #1) — produces retrieval query + reset flag
+    rewritten = rewrite_query(
+        user_message=req.message,
+        search_state=search_state,
+        llm_client=_llm_client,
+        chat_history=history,
+    )
+
+    # 1a. Reset short-circuit — no retrieval, no final LLM call
+    if rewritten.reset:
+        search_state.reset()
+        log.state_update("", "", search_state)
+        log.turn_end()
+        return ChatResponseSchema(
+            message="",
+            suggestions=[],
+            products=[],
+            search_state=_from_dataclass(search_state),
+            intent="reset",
+        )
+
+    # 1b. Topic switch — wipe state, then proceed with retrieval on the new query
+    if rewritten.topic_switch:
+        search_state.reset()
+
+    retrieval_query = rewritten.query or search_state.current_query or req.message
+
+    # 2. Multimodal Retriever
     log.retrieval(retrieval_query, 1000)
     results = search_clip_fp(
         catalog=_catalog,
@@ -205,48 +238,37 @@ async def chat(req: ChatRequest) -> ChatResponseSchema:
     )
     log.retrieval_done(len(results))
 
-    # 2. Grounding analysis (feedback folded in when provided)
-    strategy = GroundingStrategy(req.grounding_mode) if req.grounding_mode in GroundingStrategy._value2member_map_ else GroundingStrategy.ATTRIBUTE
-    grounding = build_grounding_context(results, _catalog, feedback_items=feedback_items, strategy=strategy)
-    log.grounding(grounding)
-    log.feedback(grounding.feedback_context)
+    # 3. Catalog Evidence (top-k + Context Extraction)
+    catalog_evidence = build_catalog_evidence(results, _catalog, strategy=strategy)
+    log.catalog_evidence(catalog_evidence)
 
-    # 3. LLM response
-    response_text, suggestions, updated_query, llm_data = generate_grounded_response(
+    # 4. Preference Evidence (liked items + Context Extraction)
+    preference_items = _to_preference_items(req.liked_items)
+    preference_evidence = build_preference_evidence(preference_items, _catalog, strategy=strategy)
+    log.preference_evidence(preference_evidence)
+
+    # 5. Prompt Orchestration → Final Responder LLM (LLM #2)
+    response_text, suggestions, llm_data = generate_grounded_response(
         user_message=req.message,
         search_state=search_state,
-        grounding_context=grounding,
+        catalog_evidence=catalog_evidence,
+        preference_evidence=preference_evidence,
         llm_client=_llm_client,
         chat_history=history,
     )
 
-    # 4. Update state
+    # 6. Update Search State (rewriter owns current_query; responder owns the rest)
+    if not search_state.original_query:
+        search_state.original_query = req.message
+    search_state.current_query = retrieval_query
+    search_state.last_suggestions = suggestions
+    search_state.update_from_llm(llm_data)
+
     intent = llm_data.get("intent", "")
-    if intent == "reset":
-        search_state.reset()
-    else:
-        if not search_state.original_query:
-            search_state.original_query = req.message
-        search_state.current_query = updated_query or retrieval_query
-        search_state.last_suggestions = suggestions
-        search_state.update_from_llm(llm_data)
-
-    log.state_update(retrieval_query, search_state.current_query, search_state)
-
-    # 5. Re-retrieve with refined text query
-    if intent != "reset" and updated_query and updated_query != retrieval_query:
-        log.reretrieval(updated_query)
-        results = search_clip_fp(
-            catalog=_catalog,
-            encoder=_encoder,
-            query_text=updated_query,
-            top_k=1000,
-        )
-        log.reretrieval_done(len(results))
-
+    log.state_update(req.message, search_state.current_query, search_state)
     log.turn_end()
 
-    # 6. Build product list
+    # 7. Build product list for the UI
     products: List[ProductSchema] = []
     for item in results:
         item_id: str = item["image_id"]

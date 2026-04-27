@@ -3,29 +3,24 @@ from __future__ import annotations
 import base64
 import io
 from pathlib import Path
-from typing import TYPE_CHECKING, List
+from typing import List
 
 from PIL import Image
 
-if TYPE_CHECKING:
-    from .context import GroundingContext
+from .item import ItemContext
 
 
-class ImageGrounding:
-    """Represents each retrieved item as a cropped image sent to a multimodal LLM."""
+class ImageFormatter:
+    """Renders each item as a cropped image block for a multimodal LLM."""
 
     is_multimodal = True
 
-    def format_catalog(self, context: GroundingContext) -> str:
-        """Text-only fallback when a multimodal LLM is not available."""
-        return (
-            f"Total retrieved items: {context.total_results}\n"
-            f"Showing top {len(context.items)} items as images (attached below):"
-        )
+    def format_text(self, header: str, items: List[ItemContext]) -> str:
+        return f"{header} (images attached below)"
 
-    def build_multimodal_blocks(self, context: GroundingContext) -> list:
-        blocks: list = [{"type": "text", "text": self.format_catalog(context)}]
-        for i, item in enumerate(context.items, 1):
+    def build_blocks(self, header: str, items: List[ItemContext]) -> list:
+        blocks: list = [{"type": "text", "text": self.format_text(header, items)}]
+        for i, item in enumerate(items, 1):
             if item.image_path and item.image_path.exists() and item.bbox:
                 img = _crop_bbox(item.image_path, item.bbox)
                 blocks.append({"type": "text", "text": f"Item {i}:"})
