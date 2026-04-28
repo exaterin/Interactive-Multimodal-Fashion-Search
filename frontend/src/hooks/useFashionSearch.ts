@@ -109,7 +109,8 @@ export function useFashionSearch(): UseFashionSearch {
           timestamp: new Date(),
         };
 
-        const clearsHistory = response.intent === "initial_search";
+        const clearsHistory =
+          response.intent === "initial_search" || response.intent === "new_query";
         setMessages(clearsHistory ? [userMsg, assistantMsg] : (prev) => [...prev, assistantMsg]);
         setProducts(response.products ?? []);
         setVisibleCount(200);

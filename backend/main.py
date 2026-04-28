@@ -1,13 +1,15 @@
 """
 FastAPI backend for the Fashion Search chatbot.
 
-Two-LLM pipeline per /chat call:
-  1. Query Rewriter LLM     — (search_state + user message) → rewritten retrieval query
-  2. Multimodal Retriever   — top-k items for that query
-  3. Catalog Evidence       — items + Context Extraction (Attributes/Descriptions/Images)
-  4. Preference Evidence    — liked items + same Context Extraction
-  5. Prompt Orchestration   — bundles state + catalog ev + preference ev
-  6. Final Responder LLM    — conversational response, suggestions, intent, constraints, style
+Two-LLM pipeline per /chat call (matches the project schema):
+  1. Query Composer LLM (#1)                 → query (+ reset / new_query flags)
+  2. Multimodal Retriever #1 (Composer query) → grounding
+  3. Catalog Evidence                         — Context Extraction over results
+  4. Preference Evidence                      — liked items, same Context Extraction
+  5. Response Generator LLM (#2)              → response, suggestions, updated_query,
+                                                 intent, constraints
+  6. Multimodal Retriever #2 (updated_query)  → items shown in the UI
+                                                 (skipped when updated_query is unchanged)
 
 Endpoints:
   POST   /chat          — runs the pipeline above
@@ -44,7 +46,7 @@ from src.retrieval.fashionpedia_retriever import search_clip_fp
 from src.search.catalog_evidence import build_catalog_evidence
 from src.search.context_extraction import parse_strategy
 from src.search.preference_evidence import PreferenceItem, build_preference_evidence
-from src.search.query_rewriter import rewrite_query
+from src.search.query_composer import compose_query
 from src.search.response_generator import generate_grounded_response
 from src.search.search_state import SearchState as _SearchState
 import src.log as log
@@ -201,16 +203,17 @@ async def chat(req: ChatRequest) -> ChatResponseSchema:
     log.search_state(search_state)
     log.chat_history(history)
 
-    # 1. Query Rewriter (LLM #1) — produces retrieval query + reset flag
-    rewritten = rewrite_query(
+    # 1. Query Composer LLM (#1) — produces the retrieval query (+ reset / new_query flags).
+    #    Sees only state + user message + history; runs BEFORE retrieval.
+    composed = compose_query(
         user_message=req.message,
         search_state=search_state,
         llm_client=_llm_client,
         chat_history=history,
     )
 
-    # 1a. Reset short-circuit — no retrieval, no final LLM call
-    if rewritten.reset:
+    # 1a. Reset short-circuit — no retrieval, no responder LLM
+    if composed.reset:
         search_state.reset()
         log.state_update("", "", search_state)
         log.turn_end()
@@ -222,33 +225,33 @@ async def chat(req: ChatRequest) -> ChatResponseSchema:
             intent="reset",
         )
 
-    # 1b. Topic switch — wipe state, then proceed with retrieval on the new query
-    if rewritten.topic_switch:
+    # 1b. Topic switch — wipe state so the responder builds fresh constraints
+    if composed.new_query:
         search_state.reset()
 
-    retrieval_query = rewritten.query or search_state.current_query or req.message
+    composer_query = composed.query or search_state.current_query or req.message
 
-    # 2. Multimodal Retriever
-    log.retrieval(retrieval_query, 1000)
+    # 2. Multimodal Retriever #1 — uses the Composer's query
+    log.retrieval(composer_query, 1000)
     results = search_clip_fp(
         catalog=_catalog,
         encoder=_encoder,
-        query_text=retrieval_query,
+        query_text=composer_query,
         top_k=1000,
     )
     log.retrieval_done(len(results))
 
-    # 3. Catalog Evidence (top-k + Context Extraction)
+    # 3. Catalog Evidence (over Retriever #1)
     catalog_evidence = build_catalog_evidence(results, _catalog, strategy=strategy)
     log.catalog_evidence(catalog_evidence)
 
-    # 4. Preference Evidence (liked items + Context Extraction)
+    # 4. Preference Evidence
     preference_items = _to_preference_items(req.liked_items)
     preference_evidence = build_preference_evidence(preference_items, _catalog, strategy=strategy)
     log.preference_evidence(preference_evidence)
 
-    # 5. Prompt Orchestration → Final Responder LLM (LLM #2)
-    response_text, suggestions, llm_data = generate_grounded_response(
+    # 5. Response Generator LLM (#2) — sees catalog evidence; emits updated_query + structured state
+    response_text, suggestions, updated_query, llm_data = generate_grounded_response(
         user_message=req.message,
         search_state=search_state,
         catalog_evidence=catalog_evidence,
@@ -256,19 +259,30 @@ async def chat(req: ChatRequest) -> ChatResponseSchema:
         llm_client=_llm_client,
         chat_history=history,
     )
+    intent = llm_data.get("intent", "") or ("new_query" if composed.new_query else "")
 
-    # 6. Update Search State (rewriter owns current_query; responder owns the rest)
+    # 6. Update Search State
     if not search_state.original_query:
         search_state.original_query = req.message
-    search_state.current_query = retrieval_query
+    search_state.current_query = updated_query or composer_query
     search_state.last_suggestions = suggestions
     search_state.update_from_llm(llm_data)
+    log.state_update(composer_query, search_state.current_query, search_state)
 
-    intent = llm_data.get("intent", "")
-    log.state_update(req.message, search_state.current_query, search_state)
+    # 7. Multimodal Retriever #2 — only if the responder refined the query
+    if updated_query and updated_query != composer_query:
+        log.reretrieval(updated_query)
+        results = search_clip_fp(
+            catalog=_catalog,
+            encoder=_encoder,
+            query_text=updated_query,
+            top_k=1000,
+        )
+        log.reretrieval_done(len(results))
+
     log.turn_end()
 
-    # 7. Build product list for the UI
+    # 8. Build product list for the UI
     products: List[ProductSchema] = []
     for item in results:
         item_id: str = item["image_id"]

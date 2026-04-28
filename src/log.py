@@ -93,6 +93,36 @@ def retrieval_done(count: int) -> None:
     _log.info(f"{_tag('RETRIEVAL', _GREEN)}  found {_BOLD}{count}{_RESET} results")
 
 
+def reretrieval(query: str) -> None:
+    _log.info(f"\n{_tag('RE-RETRIEVAL', _GREEN)}  updated_query={_WHITE}\"{query}\"{_RESET}")
+
+
+def reretrieval_done(count: int) -> None:
+    _log.info(f"{_tag('RE-RETRIEVAL', _GREEN)}  found {_BOLD}{count}{_RESET} results")
+
+
+def query_compose_prompt(user_content: Any) -> None:
+    _log.info(f"\n{_tag('QUERY COMPOSER', _MAGENTA)}  prompt:")
+    if isinstance(user_content, str):
+        for line in user_content.splitlines():
+            _log.info(f"  {_DIM}{line}{_RESET}")
+    else:
+        _log.info(f"  {_DIM}{user_content}{_RESET}")
+
+
+def query_compose_result(result: Any) -> None:
+    _log.info(f"{_tag('QUERY COMPOSER', _MAGENTA)}  "
+              f"reset={_BOLD}{result.reset}{_RESET}  "
+              f"new_query={_BOLD}{result.new_query}{_RESET}  "
+              f"query={_WHITE}\"{result.query}\"{_RESET}")
+
+
+def query_compose_fallback(raw: str, error: str, fallback: Any) -> None:
+    _log.info(f"\n{_tag('QUERY COMPOSER FALLBACK', _RED)}  parse error: {error}")
+    _log.info(f"  raw: {raw[:200]}{'...' if len(raw) > 200 else ''}")
+    _log.info(f"  → using query=\"{fallback.query}\" reset={fallback.reset}")
+
+
 def catalog_evidence(evidence: Any) -> None:
     _log.info(f"\n{_tag('CATALOG EVIDENCE', _YELLOW)}  {evidence.total_results} items total, "
               f"{len(evidence.items)} in context")
@@ -131,24 +161,6 @@ def preference_evidence(evidence: Any) -> None:
         _log.info(f"  {' | '.join(bits)}")
 
 
-def query_rewrite_prompt(user_content: str) -> None:
-    _log.info(f"\n{_tag('QUERY REWRITER', _MAGENTA)}  prompt:")
-    for line in user_content.splitlines():
-        _log.info(f"  {_DIM}{line}{_RESET}")
-
-
-def query_rewrite_result(result: Any, raw: str) -> None:
-    _log.info(f"{_tag('QUERY REWRITER', _MAGENTA)}  "
-              f"reset={_BOLD}{result.reset}{_RESET}  "
-              f"query={_WHITE}\"{result.query}\"{_RESET}")
-
-
-def query_rewrite_fallback(raw: str, error: str, fallback: Any) -> None:
-    _log.info(f"\n{_tag('QUERY REWRITER FALLBACK', _RED)}  parse error: {error}")
-    _log.info(f"  raw: {raw[:200]}{'...' if len(raw) > 200 else ''}")
-    _log.info(f"  → using query=\"{fallback.query}\" reset={fallback.reset}")
-
-
 def llm_prompt(system: str, user: str) -> None:
     _log.info(f"\n{_tag('LLM PROMPT', _MAGENTA)}  {_line()}")
     _log.info(f"{_DIM}--- SYSTEM ({len(system.splitlines())} lines) ---{_RESET}")
@@ -166,6 +178,7 @@ def llm_raw(raw: str) -> None:
 def llm_parsed(data: dict) -> None:
     _log.info(f"\n{_tag('LLM PARSED', _GREEN)}")
     _log.info(f"  intent      : {_BOLD}{data.get('intent', '—')}{_RESET}")
+    _log.info(f"  upd_query   : {_WHITE}\"{data.get('updated_query', '')}\"{_RESET}")
     _log.info(f"  positive    : {data.get('positive_constraints', [])}")
     _log.info(f"  negative    : {data.get('negative_constraints', [])}")
     _log.info(f"  style_tags  : {data.get('style_tags', [])}")

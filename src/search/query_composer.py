@@ -1,10 +1,14 @@
 """
-Query Rewriter (LLM #1): turn (search_state + user message) into a single
-CLIP-friendly retrieval query, plus a reset flag.
+Query Composer (LLM #1): turns (search_state + user message) into a single
+CLIP-friendly retrieval query, plus reset / new_query flags.
 
-Runs BEFORE retrieval, so the catalog evidence is always built from the
-right query the first time. No suggestions, no constraints, no intent
-classification — that is the final responder LLM's job.
+Pipeline position:
+  user_message → THIS LLM → query → retrieval_1 → catalog evidence
+  → Response Generator (LLM #2) → updated_query → retrieval_2 → UI
+
+Runs BEFORE retrieval, so it does NOT see catalog evidence. The grounded
+refinement happens in the Response Generator (LLM #2), which emits an
+updated_query that triggers a re-retrieval before results reach the UI.
 """
 from __future__ import annotations
 
@@ -19,31 +23,26 @@ from src.search.search_state import SearchState
 import src.log as log
 
 
-SYSTEM_PROMPT = load_prompt("query_rewriter")
+SYSTEM_PROMPT = load_prompt("query_composer")
 
 
 @dataclass
-class RewrittenQuery:
+class ComposedQuery:
     query: str
     reset: bool = False
-    topic_switch: bool = False
+    new_query: bool = False
 
 
-def rewrite_query(
+def compose_query(
     user_message: str,
     search_state: SearchState,
     llm_client: LLMClient,
     chat_history: Optional[List[dict]] = None,
-) -> RewrittenQuery:
-    """
-    Returns a RewrittenQuery. On parse failure, falls back to:
-      - reset=False, query=current_query if non-empty, else user_message.
-    """
-    state_str = search_state.to_context_str()
+) -> ComposedQuery:
     user_content = (
-        f"Current search state:\n{state_str}\n\n"
+        f"Current search state:\n{search_state.to_context_str()}\n\n"
         f"User's new message: \"{user_message}\"\n\n"
-        "Produce the rewritten retrieval query as JSON."
+        "Produce the retrieval query as JSON."
     )
 
     messages: List[dict] = [{"role": "system", "content": SYSTEM_PROMPT}]
@@ -51,24 +50,25 @@ def rewrite_query(
         messages.append({"role": msg["role"], "content": msg["content"]})
     messages.append({"role": "user", "content": user_content})
 
-    log.query_rewrite_prompt(user_content)
+    log.query_compose_prompt(user_content)
 
     raw = ""
     try:
         raw = llm_client.chat(messages)
         cleaned = re.sub(r"```(?:json)?\s*", "", raw).strip().rstrip("`").strip()
         data = json.loads(cleaned)
-        result = RewrittenQuery(
+        result = ComposedQuery(
             query=str(data.get("query", "")).strip(),
             reset=bool(data.get("reset", False)),
-            topic_switch=bool(data.get("topic_switch", False)),
+            new_query=bool(data.get("new_query", False)),
         )
-        log.query_rewrite_result(result, raw)
+        log.query_compose_result(result)
         return result
     except (json.JSONDecodeError, Exception) as exc:
-        fallback = RewrittenQuery(
+        fallback = ComposedQuery(
             query=search_state.current_query or user_message,
             reset=False,
+            new_query=False,
         )
-        log.query_rewrite_fallback(raw, str(exc), fallback)
+        log.query_compose_fallback(raw, str(exc), fallback)
         return fallback

@@ -4,11 +4,11 @@ Prompt Orchestration: bundles inputs into messages for the final responder LLM.
 Inputs (matches the "Prompt Orchestration" box in the project schema):
   - Conversational Feedback (the user's current message + chat history)
   - Current Search State
-  - Catalog Evidence
+  - Catalog Evidence (built from the FIRST retrieval — Composer's query)
   - Preference Evidence
 
-The Updated Query is owned by the Query Rewriter (LLM #1) and is NOT produced
-by the model orchestrated here.
+The responder also emits updated_query, which triggers a re-retrieval before
+the products are returned to the UI.
 """
 from __future__ import annotations
 
