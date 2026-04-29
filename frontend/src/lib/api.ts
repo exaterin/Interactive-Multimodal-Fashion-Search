@@ -1,4 +1,4 @@
-import type { ChatRequest, ChatResponse } from "@/types";
+import type { ChatRequest, ChatResponse, FeedbackRequest } from "@/types";
 
 /**
  * All fetch calls go to Next.js API routes (/api/chat, /api/reset)
@@ -17,6 +17,23 @@ export async function sendChatMessage(
   if (!res.ok) {
     const text = await res.text().catch(() => res.statusText);
     throw new Error(`Chat API error ${res.status}: ${text}`);
+  }
+
+  return res.json() as Promise<ChatResponse>;
+}
+
+export async function sendRelevanceFeedback(
+  body: FeedbackRequest
+): Promise<ChatResponse> {
+  const res = await fetch("/api/feedback", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => res.statusText);
+    throw new Error(`Feedback API error ${res.status}: ${text}`);
   }
 
   return res.json() as Promise<ChatResponse>;

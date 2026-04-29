@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Search } from "lucide-react";
+import { Check } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import type { Product, SearchState } from "@/types";
 
@@ -13,9 +13,9 @@ interface ResultsGridProps {
   onShowMore: () => void;
   searchState: SearchState;
   isLoading: boolean;
-  likedId: string | null;
-  onToggleLike: (product: Product) => void;
-  onFindSimilar: () => void;
+  selectedIds: Set<string>;
+  selectionFull: boolean;
+  onToggleSelect: (product: Product) => void;
   onRemoveConstraint?: (constraint: string) => void;
 }
 
@@ -26,9 +26,9 @@ export function ResultsGrid({
   onShowMore,
   searchState,
   isLoading,
-  likedId,
-  onToggleLike,
-  onFindSimilar,
+  selectedIds,
+  selectionFull,
+  onToggleSelect,
   onRemoveConstraint,
 }: ResultsGridProps) {
   const hasQuery = !!searchState.current_query;
@@ -87,6 +87,17 @@ export function ResultsGrid({
             )}
           </div>
         )}
+
+        {/* Selection helper */}
+        {hasResults && (
+          <p className="mt-2 text-[11px] text-gray-400">
+            {selectedIds.size === 0
+              ? "Tap up to 3 items to send relevance feedback."
+              : `${selectedIds.size} of 3 selected${
+                  selectionFull ? " — at the limit" : ""
+                }.`}
+          </p>
+        )}
       </div>
 
       {/* Grid area */}
@@ -105,9 +116,9 @@ export function ResultsGrid({
             <ProductGrid
               products={products}
               isLoading={isLoading}
-              likedId={likedId}
-              onToggleLike={onToggleLike}
-              onFindSimilar={onFindSimilar}
+              selectedIds={selectedIds}
+              selectionFull={selectionFull}
+              onToggleSelect={onToggleSelect}
             />
             {hasMore && (
               <div className="flex justify-center pt-6 pb-2">
@@ -131,15 +142,15 @@ export function ResultsGrid({
 function ProductGrid({
   products,
   isLoading,
-  likedId,
-  onToggleLike,
-  onFindSimilar,
+  selectedIds,
+  selectionFull,
+  onToggleSelect,
 }: {
   products: Product[];
   isLoading: boolean;
-  likedId: string | null;
-  onToggleLike: (p: Product) => void;
-  onFindSimilar: () => void;
+  selectedIds: Set<string>;
+  selectionFull: boolean;
+  onToggleSelect: (p: Product) => void;
 }) {
   return (
     <div className="grid grid-cols-6 gap-3">
@@ -155,9 +166,9 @@ function ProductGrid({
           >
             <ProductCard
               product={product}
-              isLiked={product.id === likedId}
-              onToggleLike={onToggleLike}
-              onFindSimilar={onFindSimilar}
+              isSelected={selectedIds.has(product.id)}
+              selectionFull={selectionFull}
+              onToggleSelect={onToggleSelect}
             />
           </motion.div>
         ))}
@@ -168,26 +179,35 @@ function ProductGrid({
 
 function ProductCard({
   product,
-  isLiked,
-  onToggleLike,
-  onFindSimilar,
+  isSelected,
+  selectionFull,
+  onToggleSelect,
 }: {
   product: Product;
-  isLiked: boolean;
-  onToggleLike: (p: Product) => void;
-  onFindSimilar: () => void;
+  isSelected: boolean;
+  selectionFull: boolean;
+  onToggleSelect: (p: Product) => void;
 }) {
   const [imgError, setImgError] = useState(false);
+  const disabled = !isSelected && selectionFull;
 
   return (
     <div
       className={[
-        "group rounded-xl overflow-hidden border bg-white transition-all duration-150 cursor-pointer",
-        isLiked
-          ? "border-rose-300 shadow-[0_0_0_1px_rgb(251,113,133)]"
-          : "border-gray-100 hover:border-gray-200 hover:shadow-sm",
+        "group rounded-xl overflow-hidden border bg-white transition-all duration-150",
+        disabled
+          ? "border-gray-100 opacity-50 cursor-not-allowed"
+          : "cursor-pointer",
+        isSelected
+          ? "border-rose-400 shadow-[0_0_0_2px_rgb(251,113,133)]"
+          : !disabled
+          ? "border-gray-100 hover:border-gray-200 hover:shadow-sm"
+          : "",
       ].join(" ")}
-      onClick={() => onToggleLike(product)}
+      onClick={() => {
+        if (disabled) return;
+        onToggleSelect(product);
+      }}
     >
       {/* Image */}
       <div className="aspect-[3/4] bg-gray-50 overflow-hidden relative">
@@ -206,18 +226,11 @@ function ProductCard({
           </div>
         )}
 
-        {/* "Find similar" button — only on liked card */}
-        {isLiked && (
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onFindSimilar();
-            }}
-            className="absolute inset-x-0 bottom-0 flex items-center justify-center gap-1 bg-rose-500 hover:bg-rose-600 text-white text-[10px] font-semibold py-1.5 transition-colors"
-          >
-            <Search className="h-2.5 w-2.5" />
-            Find similar
-          </button>
+        {/* Selection badge */}
+        {isSelected && (
+          <div className="absolute top-1.5 right-1.5 h-5 w-5 rounded-full bg-rose-500 text-white flex items-center justify-center shadow">
+            <Check className="h-3 w-3" />
+          </div>
         )}
       </div>
 

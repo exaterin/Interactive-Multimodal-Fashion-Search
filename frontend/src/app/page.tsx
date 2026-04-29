@@ -1,8 +1,12 @@
 "use client";
 
+import { useMemo } from "react";
 import { ChatPanel } from "@/components/ChatPanel";
 import { ResultsGrid } from "@/components/ResultsGrid";
-import { useFashionSearch } from "@/hooks/useFashionSearch";
+import {
+  MAX_SELECTED_FOR_FEEDBACK,
+  useFashionSearch,
+} from "@/hooks/useFashionSearch";
 
 export default function Home() {
   const {
@@ -13,21 +17,29 @@ export default function Home() {
     showMore,
     searchState,
     isLoading,
-    likedProducts,
+    selectedProducts,
     groundingMode,
     setGroundingMode,
     sendMessage,
-    findSimilar,
+    submitFeedback,
     clearChat,
     removePositiveConstraint,
-    toggleLike,
+    toggleSelect,
   } = useFashionSearch();
 
-  const likedId = likedProducts.size > 0 ? likedProducts.keys().next().value as string : null;
+  const selectedIds = useMemo(
+    () => new Set(selectedProducts.keys()),
+    [selectedProducts]
+  );
+  const selectedList = useMemo(
+    () => Array.from(selectedProducts.values()),
+    [selectedProducts]
+  );
+  const selectionFull = selectedProducts.size >= MAX_SELECTED_FOR_FEEDBACK;
 
   return (
     <div className="flex h-screen overflow-hidden bg-white">
-      {/* ── Left: Chat ── */}
+      {/* ── Left: Chat (input handles both messages and relevance feedback) ── */}
       <div className="w-[480px] flex-shrink-0 flex flex-col border-r border-gray-100">
         <ChatPanel
           messages={messages}
@@ -35,6 +47,9 @@ export default function Home() {
           groundingMode={groundingMode}
           onGroundingModeChange={setGroundingMode}
           onSend={sendMessage}
+          onSubmitFeedback={submitFeedback}
+          selected={selectedList}
+          onRemoveSelected={toggleSelect}
           onClear={clearChat}
         />
       </div>
@@ -48,9 +63,9 @@ export default function Home() {
           onShowMore={showMore}
           searchState={searchState}
           isLoading={isLoading}
-          likedId={likedId}
-          onToggleLike={toggleLike}
-          onFindSimilar={findSimilar}
+          selectedIds={selectedIds}
+          selectionFull={selectionFull}
+          onToggleSelect={toggleSelect}
           onRemoveConstraint={removePositiveConstraint}
         />
       </div>

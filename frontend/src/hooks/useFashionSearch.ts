@@ -1,9 +1,11 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import { sendChatMessage, resetChat } from "@/lib/api";
+import { sendChatMessage, sendRelevanceFeedback, resetChat } from "@/lib/api";
 import { makeId, initialSearchState } from "@/lib/utils";
 import type { Message, Product, SearchState, LikedItem, HistoryMessage } from "@/types";
+
+export const MAX_SELECTED_FOR_FEEDBACK = 3;
 
 interface UseFashionSearch {
   messages: Message[];
@@ -14,14 +16,15 @@ interface UseFashionSearch {
   searchState: SearchState;
   isLoading: boolean;
   error: string | null;
-  likedProducts: Map<string, Product>;
+  selectedProducts: Map<string, Product>;
   groundingMode: "attribute" | "description" | "image";
   setGroundingMode: (mode: "attribute" | "description" | "image") => void;
   sendMessage: (text: string) => Promise<void>;
-  findSimilar: () => Promise<void>;
+  submitFeedback: (comment: string) => Promise<void>;
   clearChat: () => void;
   removePositiveConstraint: (constraint: string) => Promise<void>;
-  toggleLike: (product: Product) => void;
+  toggleSelect: (product: Product) => void;
+  clearSelection: () => void;
 }
 
 export function useFashionSearch(): UseFashionSearch {
@@ -33,7 +36,7 @@ export function useFashionSearch(): UseFashionSearch {
   );
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [likedProducts, setLikedProducts] = useState<Map<string, Product>>(
+  const [selectedProducts, setSelectedProducts] = useState<Map<string, Product>>(
     new Map()
   );
   const [groundingMode, setGroundingMode] = useState<"attribute" | "description" | "image">(
@@ -47,19 +50,26 @@ export function useFashionSearch(): UseFashionSearch {
     setVisibleCount((prev) => prev + 200);
   }, []);
 
-  const toggleLike = useCallback((product: Product) => {
-    setLikedProducts((prev) => {
-      // Single selection: clicking the same item deselects it,
-      // clicking a different item replaces the current selection.
-      if (prev.has(product.id)) {
-        return new Map();
+  const toggleSelect = useCallback((product: Product) => {
+    setSelectedProducts((prev) => {
+      const next = new Map(prev);
+      if (next.has(product.id)) {
+        next.delete(product.id);
+        return next;
       }
-      return new Map([[product.id, product]]);
+      if (next.size >= MAX_SELECTED_FOR_FEEDBACK) {
+        return prev;
+      }
+      next.set(product.id, product);
+      return next;
     });
   }, []);
 
+  const clearSelection = useCallback(() => {
+    setSelectedProducts(new Map());
+  }, []);
 
-  const _buildLikedItems = (map: Map<string, Product>): LikedItem[] =>
+  const _toLikedItems = (map: Map<string, Product>): LikedItem[] =>
     Array.from(map.values()).map((p) => ({
       id: p.id,
       category: p.category,
@@ -87,7 +97,7 @@ export function useFashionSearch(): UseFashionSearch {
         const response = await sendChatMessage({
           message: text.trim(),
           search_state: searchState,
-          liked_items: _buildLikedItems(likedProducts),
+          liked_items: [], // relevance feedback now flows through /feedback
           grounding_mode: groundingMode,
           chat_history: _buildHistory(messages),
         });
@@ -97,7 +107,7 @@ export function useFashionSearch(): UseFashionSearch {
           setProducts([]);
           setVisibleCount(200);
           setSearchState(initialSearchState());
-          setLikedProducts(new Map());
+          setSelectedProducts(new Map());
           return;
         }
 
@@ -132,64 +142,76 @@ export function useFashionSearch(): UseFashionSearch {
         setIsLoading(false);
       }
     },
-    [isLoading, searchState, likedProducts, groundingMode]
+    [isLoading, searchState, groundingMode, messages]
   );
 
-  const findSimilar = useCallback(async () => {
-    if (isLoading || likedProducts.size === 0) return;
-    setError(null);
+  const submitFeedback = useCallback(
+    async (comment: string) => {
+      if (isLoading) return;
+      if (selectedProducts.size === 0 || selectedProducts.size > MAX_SELECTED_FOR_FEEDBACK) return;
 
-    const likedList = Array.from(likedProducts.values());
-    const userMsg: Message = {
-      id: makeId(),
-      role: "user",
-      content: `Find items visually similar to my ${likedList.length} liked item${likedList.length !== 1 ? "s" : ""}`,
-      likedImages: likedList.map((p) => p.image_url),
-      timestamp: new Date(),
-    };
-    setMessages((prev) => [...prev, userMsg]);
-    setIsLoading(true);
+      setError(null);
 
-    try {
-      const response = await sendChatMessage({
-        message: userMsg.content,
-        search_state: searchState,
-        liked_items: _buildLikedItems(likedProducts),
-        use_image_similarity: true,
-        grounding_mode: groundingMode,
-        chat_history: _buildHistory(messages),
-      });
+      const selectedList = Array.from(selectedProducts.values());
+      const trimmedComment = comment.trim();
 
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: makeId(),
-          role: "assistant",
-          content: response.message,
-          suggestions: response.suggestions ?? [],
-          timestamp: new Date(),
-        },
-      ]);
-      setProducts(response.products ?? []);
-      setVisibleCount(200);
-      setSearchState(response.search_state ?? searchState);
-      setLikedProducts(new Map()); // clear after successful search
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "Unexpected error";
-      setError(message);
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: makeId(),
-          role: "assistant",
-          content: `Sorry, something went wrong: ${message}`,
-          timestamp: new Date(),
-        },
-      ]);
-    } finally {
-      setIsLoading(false);
-    }
-  }, [isLoading, searchState, likedProducts, groundingMode]);
+      const userContent =
+        trimmedComment ||
+        `Use these ${selectedList.length} item${
+          selectedList.length !== 1 ? "s" : ""
+        } as a relevance signal`;
+
+      const userMsg: Message = {
+        id: makeId(),
+        role: "user",
+        content: userContent,
+        likedImages: selectedList.map((p) => p.image_url),
+        timestamp: new Date(),
+      };
+      setMessages((prev) => [...prev, userMsg]);
+      setIsLoading(true);
+
+      try {
+        const response = await sendRelevanceFeedback({
+          selected_items: _toLikedItems(selectedProducts),
+          comment: trimmedComment,
+          search_state: searchState,
+          grounding_mode: groundingMode,
+          chat_history: _buildHistory(messages),
+        });
+
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: makeId(),
+            role: "assistant",
+            content: response.message,
+            suggestions: response.suggestions ?? [],
+            timestamp: new Date(),
+          },
+        ]);
+        setProducts(response.products ?? []);
+        setVisibleCount(200);
+        setSearchState(response.search_state ?? searchState);
+        setSelectedProducts(new Map());
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Unexpected error";
+        setError(message);
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: makeId(),
+            role: "assistant",
+            content: `Sorry, something went wrong: ${message}`,
+            timestamp: new Date(),
+          },
+        ]);
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [isLoading, searchState, selectedProducts, groundingMode, messages]
+  );
 
   const clearChat = useCallback(async () => {
     resetChat().catch(() => null);
@@ -198,7 +220,7 @@ export function useFashionSearch(): UseFashionSearch {
     setVisibleCount(200);
     setSearchState(initialSearchState());
     setError(null);
-    setLikedProducts(new Map());
+    setSelectedProducts(new Map());
   }, []);
 
   const removePositiveConstraint = useCallback(
@@ -227,7 +249,7 @@ export function useFashionSearch(): UseFashionSearch {
         const response = await sendChatMessage({
           message: `The user removed the constraint "${constraint}". Refresh results without it.`,
           search_state: updatedState,
-          liked_items: _buildLikedItems(likedProducts),
+          liked_items: [],
           grounding_mode: groundingMode,
           chat_history: _buildHistory(messages),
         });
@@ -261,7 +283,7 @@ export function useFashionSearch(): UseFashionSearch {
         setIsLoading(false);
       }
     },
-    [isLoading, searchState, likedProducts, groundingMode]
+    [isLoading, searchState, groundingMode, messages]
   );
 
   return {
@@ -273,13 +295,14 @@ export function useFashionSearch(): UseFashionSearch {
     searchState,
     isLoading,
     error,
-    likedProducts,
+    selectedProducts,
     groundingMode,
     setGroundingMode,
     sendMessage,
-    findSimilar,
+    submitFeedback,
     clearChat,
     removePositiveConstraint,
-    toggleLike,
+    toggleSelect,
+    clearSelection,
   };
 }

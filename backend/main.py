@@ -47,6 +47,7 @@ from src.search.catalog_evidence import build_catalog_evidence
 from src.search.context_extraction import parse_strategy
 from src.search.preference_evidence import PreferenceItem, build_preference_evidence
 from src.search.query_composer import compose_query
+from src.search.relevance_feedback import run_relevance_feedback
 from src.search.response_generator import generate_grounded_response
 from src.search.search_state import SearchState as _SearchState
 import src.log as log
@@ -79,6 +80,14 @@ class ChatRequest(BaseModel):
     message: str
     search_state: SearchStateSchema
     liked_items: List[LikedItemSchema] = []
+    grounding_mode: str = "attribute"
+    chat_history: List[HistoryMessageSchema] = []
+
+
+class FeedbackRequest(BaseModel):
+    selected_items: List[LikedItemSchema]
+    comment: str = ""
+    search_state: SearchStateSchema
     grounding_mode: str = "attribute"
     chat_history: List[HistoryMessageSchema] = []
 
@@ -311,6 +320,97 @@ async def chat(req: ChatRequest) -> ChatResponseSchema:
         products=products,
         search_state=_from_dataclass(search_state),
         intent=intent,
+    )
+
+
+@app.post("/feedback", response_model=ChatResponseSchema)
+async def feedback(req: FeedbackRequest) -> ChatResponseSchema:
+    """
+    Relevance feedback pipeline.
+
+    Runs ONLY when the user has selected 1–3 items from the current retrieval
+    and (optionally) attached a short comment. Bypasses the standard
+    composer→responder /chat flow:
+
+      selected_items + comment + state
+        → relevance-feedback LLM (refined_query + response + state)
+        → multimodal retrieval
+        → UI
+    """
+    if not req.selected_items:
+        raise HTTPException(status_code=400, detail="At least one selected item is required")
+    if len(req.selected_items) > 3:
+        raise HTTPException(status_code=400, detail="At most 3 items may be selected")
+
+    search_state = _to_dataclass(req.search_state)
+    history = [{"role": m.role, "content": m.content} for m in req.chat_history]
+    strategy = parse_strategy(req.grounding_mode)
+    selected = _to_preference_items(req.selected_items)
+
+    log.turn_start(f"[relevance feedback] {len(selected)} selected | comment: \"{req.comment}\"")
+    log.search_state(search_state)
+    log.chat_history(history)
+
+    # 1. Relevance Feedback LLM — refined_query + response + state updates
+    result = run_relevance_feedback(
+        selected_items=selected,
+        comment=req.comment,
+        search_state=search_state,
+        catalog=_catalog,
+        llm_client=_llm_client,
+        strategy=strategy,
+        chat_history=history,
+    )
+
+    # 2. Update search state from the LLM output
+    if not search_state.original_query:
+        search_state.original_query = req.comment or search_state.current_query
+    old_query = search_state.current_query
+    search_state.current_query = result.refined_query or search_state.current_query
+    search_state.update_from_llm(result.raw)
+    search_state.last_suggestions = []
+    log.state_update(old_query, search_state.current_query, search_state)
+
+    # 3. Retrieval with the refined query
+    retrieval_query = search_state.current_query or old_query
+    log.retrieval(retrieval_query, 1000)
+    results = search_clip_fp(
+        catalog=_catalog,
+        encoder=_encoder,
+        query_text=retrieval_query,
+        top_k=1000,
+    )
+    log.retrieval_done(len(results))
+    log.turn_end()
+
+    # 4. Build product list
+    products: List[ProductSchema] = []
+    for item in results:
+        item_id: str = item["image_id"]
+        raw_attrs = _catalog.attribute_annotations.get(item_id, {})
+        attributes: Dict[str, List[str]] = {
+            k: list(v) for k, v in raw_attrs.items() if v
+        }
+        colors = _catalog.color_annotations.get(item_id, [])
+        if colors:
+            attributes["color"] = colors
+
+        products.append(
+            ProductSchema(
+                id=item_id,
+                image_url=f"/images/{item_id}",
+                category=_catalog.category_annotations.get(item_id),
+                score=item.get("score"),
+                attributes=attributes or None,
+            )
+        )
+
+    return ChatResponseSchema(
+        message=result.response,
+        suggestions=[],
+        products=products,
+        search_state=_from_dataclass(search_state),
+        intent="relevance_feedback",
     )
 
 

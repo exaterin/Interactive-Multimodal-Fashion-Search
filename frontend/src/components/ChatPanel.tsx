@@ -4,7 +4,7 @@ import { RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { MessageList } from "@/components/MessageList";
 import { InputBox } from "@/components/InputBox";
-import type { Message } from "@/types";
+import type { Message, Product } from "@/types";
 
 interface ChatPanelProps {
   messages: Message[];
@@ -12,6 +12,9 @@ interface ChatPanelProps {
   groundingMode: "attribute" | "description" | "image";
   onGroundingModeChange: (mode: "attribute" | "description" | "image") => void;
   onSend: (text: string) => void;
+  onSubmitFeedback: (comment: string) => void;
+  selected: Product[];
+  onRemoveSelected: (product: Product) => void;
   onClear: () => void;
 }
 
@@ -21,6 +24,9 @@ export function ChatPanel({
   groundingMode,
   onGroundingModeChange,
   onSend,
+  onSubmitFeedback,
+  selected,
+  onRemoveSelected,
   onClear,
 }: ChatPanelProps) {
   return (
@@ -80,7 +86,13 @@ export function ChatPanel({
 
       {/* Input */}
       <div className="border-t border-gray-100">
-        <InputBox onSend={onSend} disabled={isLoading} />
+        <InputBox
+          onSend={onSend}
+          onSubmitFeedback={onSubmitFeedback}
+          selected={selected}
+          onRemoveSelected={onRemoveSelected}
+          disabled={isLoading}
+        />
       </div>
     </div>
   );

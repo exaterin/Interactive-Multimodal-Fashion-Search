@@ -53,7 +53,16 @@ export interface ChatRequest {
   chat_history?: HistoryMessage[];
 }
 
-/** Shape returned by POST /api/chat */
+/** Body sent to POST /api/feedback (relevance feedback pipeline) */
+export interface FeedbackRequest {
+  selected_items: LikedItem[];
+  comment: string;
+  search_state: SearchState;
+  grounding_mode?: "attribute" | "description" | "image";
+  chat_history?: HistoryMessage[];
+}
+
+/** Shape returned by POST /api/chat or /api/feedback */
 export interface ChatResponse {
   message: string;
   suggestions: string[];
