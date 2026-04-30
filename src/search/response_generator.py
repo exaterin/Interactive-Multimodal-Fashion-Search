@@ -5,9 +5,12 @@ Pipeline position:
   retrieval_1 (Composer's query) → catalog evidence → THIS LLM
   → updated_query → retrieval_2 (if changed) → UI
 
-Sees catalog evidence (from the first retrieval) and emits the conversational
-reply, grounded suggestions, intent, full constraint set, AND an updated_query
-that drives a re-retrieval before results reach the UI.
+The system prompt sent to this LLM is the concatenation of:
+  - the RETRIEVAL module prompt (grounded_response.txt)
+  - the CONVERSATION module prompt (conversation.txt)
+  - a unified flat-schema output contract.
+
+Still ONE LLM call per turn; the LLM emits a single flat JSON.
 """
 from __future__ import annotations
 
@@ -55,7 +58,7 @@ def generate_grounded_response(
 
         log.llm_parsed(data)
 
-        response = data.get("response", "").strip()
+        response = str(data.get("response", "")).strip()
         suggestions = [s for s in data.get("suggestions", []) if s][:4]
         updated_query = str(data.get("updated_query", "")).strip()
         return response, suggestions, updated_query, data

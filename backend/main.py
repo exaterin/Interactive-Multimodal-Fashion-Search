@@ -368,7 +368,7 @@ async def feedback(req: FeedbackRequest) -> ChatResponseSchema:
     old_query = search_state.current_query
     search_state.current_query = result.refined_query or search_state.current_query
     search_state.update_from_llm(result.raw)
-    search_state.last_suggestions = []
+    search_state.last_suggestions = result.suggestions
     log.state_update(old_query, search_state.current_query, search_state)
 
     # 3. Retrieval with the refined query
@@ -407,7 +407,7 @@ async def feedback(req: FeedbackRequest) -> ChatResponseSchema:
 
     return ChatResponseSchema(
         message=result.response,
-        suggestions=[],
+        suggestions=result.suggestions,
         products=products,
         search_state=_from_dataclass(search_state),
         intent="relevance_feedback",

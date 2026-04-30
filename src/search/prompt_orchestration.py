@@ -14,13 +14,13 @@ from __future__ import annotations
 
 from typing import List, Tuple, Union
 
-from src.prompts import load_prompt
+from src.prompts import load_dual_prompt
 from src.search.catalog_evidence import CatalogEvidence
 from src.search.preference_evidence import PreferenceEvidence
 from src.search.search_state import SearchState
 
 
-SYSTEM_PROMPT = load_prompt("grounded_response")
+SYSTEM_PROMPT = load_dual_prompt("grounded_response", retrieval_query_field="updated_query")
 
 _INSTRUCTION_TEMPLATE = (
     "\n\nUser's message: \"{message}\"\n\n"

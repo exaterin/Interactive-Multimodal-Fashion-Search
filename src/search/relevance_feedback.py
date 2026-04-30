@@ -24,7 +24,7 @@ from typing import List, Optional, Tuple, Union
 
 from src.conversation.llm_client import LLMClient
 from src.data.fashionpedia.catalog import FashionpediaCatalog
-from src.prompts import load_prompt
+from src.prompts import load_dual_prompt
 from src.search.context_extraction import (
     ExtractionStrategy,
     ItemContext,
@@ -36,13 +36,14 @@ from src.search.search_state import SearchState
 import src.log as log
 
 
-SYSTEM_PROMPT = load_prompt("relevance_feedback")
+SYSTEM_PROMPT = load_dual_prompt("relevance_feedback", retrieval_query_field="refined_query")
 
 
 @dataclass
 class FeedbackResult:
     response: str
     refined_query: str
+    suggestions: List[str]
     raw: dict
 
 
@@ -104,6 +105,7 @@ def run_relevance_feedback(
         return FeedbackResult(
             response="",
             refined_query=search_state.current_query,
+            suggestions=[],
             raw={},
         )
 
@@ -155,7 +157,7 @@ def run_relevance_feedback(
             "style_tags": data.get("style_tags", []),
             "category": data.get("category", ""),
             "occasion": data.get("occasion", ""),
-            "suggestions": [],
+            "suggestions": data.get("suggestions", []),
             "response": data.get("response", ""),
         })
 
@@ -163,7 +165,13 @@ def run_relevance_feedback(
         refined_query = str(data.get("refined_query", "")).strip()
         if not refined_query:
             refined_query = search_state.current_query
-        return FeedbackResult(response=response, refined_query=refined_query, raw=data)
+        suggestions = [s for s in data.get("suggestions", []) if s][:4]
+        return FeedbackResult(
+            response=response,
+            refined_query=refined_query,
+            suggestions=suggestions,
+            raw=data,
+        )
 
     except (json.JSONDecodeError, Exception) as exc:
         log.llm_fallback(raw, str(exc))
@@ -174,5 +182,6 @@ def run_relevance_feedback(
         return FeedbackResult(
             response=fallback_text,
             refined_query=search_state.current_query,
+            suggestions=[],
             raw={},
         )
