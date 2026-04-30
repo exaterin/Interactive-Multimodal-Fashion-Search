@@ -14,6 +14,8 @@ export interface Message {
   suggestions?: string[];
   /** Image URLs to show as thumbnails inside a user message (liked items) */
   likedImages?: string[];
+  /** UI-only message (e.g. opening greeting); excluded from chat_history sent to the LLM */
+  transient?: boolean;
   timestamp: Date;
 }
 

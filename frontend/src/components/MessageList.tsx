@@ -1,9 +1,55 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { SuggestionChips } from "@/components/SuggestionChips";
 import type { Message } from "@/types";
+
+// Typewriter effect for assistant messages: characters appear one at a time,
+// with a short pause on punctuation and a blinking caret while typing.
+function TypewriterText({ text }: { text: string }) {
+  const [shown, setShown] = useState(0);
+
+  useEffect(() => {
+    setShown(0);
+    if (!text) return;
+    let i = 0;
+    let cancelled = false;
+
+    const tick = () => {
+      if (cancelled) return;
+      i += 1;
+      setShown(i);
+      if (i >= text.length) return;
+      const ch = text[i - 1];
+      // brief pause on sentence punctuation, otherwise type fast
+      const delay = /[.!?]/.test(ch) ? 110 : /[,;:]/.test(ch) ? 60 : 16;
+      window.setTimeout(tick, delay);
+    };
+    const start = window.setTimeout(tick, 80);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(start);
+    };
+  }, [text]);
+
+  const isTyping = shown < text.length;
+
+  return (
+    <span>
+      {text.slice(0, shown)}
+      {isTyping && (
+        <motion.span
+          aria-hidden
+          className="inline-block w-[2px] h-[1em] align-[-2px] ml-[1px] bg-gray-500"
+          animate={{ opacity: [1, 0, 1] }}
+          transition={{ duration: 0.9, repeat: Infinity, ease: "linear" }}
+        />
+      )}
+    </span>
+  );
+}
 
 interface MessageListProps {
   messages: Message[];
@@ -78,15 +124,26 @@ export function MessageList({
                 )}
 
                 {/* Bubble */}
-                <div
+                <motion.div
+                  initial={
+                    isUser
+                      ? false
+                      : { opacity: 0, y: 6, scale: 0.96 }
+                  }
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
                   className={`px-3.5 py-2.5 rounded-2xl text-sm leading-relaxed ${
                     isUser
                       ? "bg-gray-900 text-white rounded-br-sm"
                       : "bg-gray-50 text-gray-900 border border-gray-100 rounded-bl-sm"
                   }`}
                 >
-                  {msg.content}
-                </div>
+                  {isUser ? (
+                    msg.content
+                  ) : (
+                    <TypewriterText text={msg.content} />
+                  )}
+                </motion.div>
 
                 {/* Suggestion chips — only on the latest assistant message */}
                 {!isUser && isLast && msg.suggestions?.length ? (

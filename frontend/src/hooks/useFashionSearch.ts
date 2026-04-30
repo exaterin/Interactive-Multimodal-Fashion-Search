@@ -1,11 +1,14 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { sendChatMessage, sendRelevanceFeedback, resetChat } from "@/lib/api";
 import { makeId, initialSearchState } from "@/lib/utils";
 import type { Message, Product, SearchState, LikedItem, HistoryMessage } from "@/types";
 
 export const MAX_SELECTED_FOR_FEEDBACK = 3;
+
+const GREETING_TEXT =
+  "Hi, I'm your Fashion Assistant. You can search for a specific item, describe a mood, an occasion, or just tell me what kind of style you want to explore.";
 
 interface UseFashionSearch {
   messages: Message[];
@@ -77,7 +80,48 @@ export function useFashionSearch(): UseFashionSearch {
     }));
 
   const _buildHistory = (msgs: Message[]): HistoryMessage[] =>
-    msgs.map((m) => ({ role: m.role, content: m.content }));
+    msgs
+      .filter((m) => !m.transient)
+      .map((m) => ({ role: m.role, content: m.content }));
+
+  // Show the opening assistant greeting once the user actually interacts with
+  // the page (mouse move, click, scroll, key press, or touch). This makes the
+  // greeting feel reactive instead of timed. Marked transient so it never gets
+  // sent back to the LLM as chat_history.
+  useEffect(() => {
+    if (messages.length !== 0) return;
+
+    const showGreeting = () => {
+      setMessages((prev) => {
+        if (prev.length !== 0) return prev;
+        return [
+          {
+            id: makeId(),
+            role: "assistant",
+            content: GREETING_TEXT,
+            transient: true,
+            timestamp: new Date(),
+          },
+        ];
+      });
+    };
+
+    const events: (keyof WindowEventMap)[] = [
+      "mousemove",
+      "click",
+      "keydown",
+      "scroll",
+      "touchstart",
+    ];
+    const handler = () => {
+      showGreeting();
+      events.forEach((e) => window.removeEventListener(e, handler));
+    };
+    events.forEach((e) =>
+      window.addEventListener(e, handler, { once: false, passive: true })
+    );
+    return () => events.forEach((e) => window.removeEventListener(e, handler));
+  }, [messages.length]);
 
   const sendMessage = useCallback(
     async (text: string) => {
@@ -119,9 +163,7 @@ export function useFashionSearch(): UseFashionSearch {
           timestamp: new Date(),
         };
 
-        const clearsHistory =
-          response.intent === "initial_search" || response.intent === "new_query";
-        setMessages(clearsHistory ? [userMsg, assistantMsg] : (prev) => [...prev, assistantMsg]);
+        setMessages((prev) => [...prev, assistantMsg]);
         setProducts(response.products ?? []);
         setVisibleCount(200);
         setSearchState(response.search_state ?? searchState);
