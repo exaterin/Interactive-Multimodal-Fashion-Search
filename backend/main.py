@@ -40,7 +40,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.conversation.llm_client import LLMClient
-from src.data.fashionpedia.loaders import load_fashionpedia_catalog
+from src.datasets.fashionpedia.loaders import load_fashionpedia_catalog
 from src.models.fashion_clip_encoder import build_fashion_clip_encoder
 from src.retrieval.fashionpedia_retriever import search_clip_fp
 from src.search.catalog_evidence import build_catalog_evidence

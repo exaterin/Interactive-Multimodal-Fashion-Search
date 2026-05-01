@@ -4,7 +4,7 @@ from typing import List, Optional
 
 import numpy as np
 
-from src.data.deepfashion.catalog import Catalog
+from src.datasets.deepfashion.catalog import Catalog
 from src.models.fashion_clip_encoder import FashionCLIPEncoder
 
 

@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, List
 
-from src.data.fashionpedia.catalog import FashionpediaCatalog
+from src.datasets.fashionpedia.catalog import FashionpediaCatalog
 from src.search.context_extraction import (
     ExtractionStrategy,
     ItemContext,

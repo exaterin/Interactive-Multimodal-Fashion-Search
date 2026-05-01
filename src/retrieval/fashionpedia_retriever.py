@@ -4,8 +4,8 @@ from typing import Dict, List, Optional
 
 import numpy as np
 
-from src.data.fashionpedia.catalog import FashionpediaCatalog
-from src.data.fashionpedia.annotation_parser import (
+from src.datasets.fashionpedia.catalog import FashionpediaCatalog
+from src.datasets.fashionpedia.annotation_parser import (
     _PATTERN_SUPERCATS,
     _SHAPE_SUPERCATS,
     _MATERIAL_SUPERCATS,

@@ -14,7 +14,7 @@ from fashion_clip.fashion_clip import FashionCLIP
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.data.fashionpedia.annotation_parser import parse_fashionpedia_annotations  # noqa: E402
+from src.datasets.fashionpedia.annotation_parser import parse_fashionpedia_annotations  # noqa: E402
 
 ANNOTATIONS_JSON = PROJECT_ROOT / "data" / "fashionpedia" / "instances_attributes_train2020.json"
 EMBEDDINGS_PATH  = PROJECT_ROOT / "data" / "fashionpedia" / "embeddings" / "fashionpedia_embeddings.npy"

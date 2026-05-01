@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from typing import List, Optional, Tuple, Union
 
 from src.conversation.llm_client import LLMClient
-from src.data.fashionpedia.catalog import FashionpediaCatalog
+from src.datasets.fashionpedia.catalog import FashionpediaCatalog
 from src.prompts import load_dual_prompt
 from src.search.context_extraction import (
     ExtractionStrategy,
