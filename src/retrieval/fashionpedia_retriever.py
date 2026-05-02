@@ -10,6 +10,7 @@ from src.datasets.fashionpedia.annotation_parser import (
     _SHAPE_SUPERCATS,
     _MATERIAL_SUPERCATS,
     _FINISHING_SUPERCATS,
+    _ACCESSORIES_SUPERCATS,
 )
 from src.models.fashion_clip_encoder import FashionCLIPEncoder
 
@@ -66,6 +67,14 @@ def matches_filters_fp(
         for sc in _FINISHING_SUPERCATS:
             item_finishings.update(supercat_dict.get(sc, set()))
         if not set(selected_filters["finishing"]).issubset(item_finishings):
+            return False
+
+    if selected_filters.get("accessories"):
+        supercat_dict = catalog.attribute_annotations.get(item_id, {})
+        item_accessories: set = set()
+        for sc in _ACCESSORIES_SUPERCATS:
+            item_accessories.update(supercat_dict.get(sc, set()))
+        if not set(selected_filters["accessories"]).issubset(item_accessories):
             return False
 
     if selected_filters.get("color"):

@@ -1,15 +1,16 @@
-"""Promote contained decoration/closure crops into parent garment attributes.
+"""Promote contained crops into synthetic attributes on their parent garment.
 
-For every annotation whose category supercategory is in `PROMOTE_FROM`, find the
-smallest sibling annotation (same image) whose bbox contains at least
-`CONTAINMENT_THRESHOLD` of the donor's area and whose category is in a
-"recipient" supercategory. The donor's category name is added as a synthetic
-attribute on that parent.
+For every annotation whose category supercategory is a key in
+`SUPERCAT_TO_ATTR_GROUP`, find the smallest sibling annotation in the same
+image whose bbox contains at least `CONTAINMENT_THRESHOLD` of the donor's
+area and whose category is in a "recipient" supercategory. The donor's
+category name (with an `(a)` suffix) is added as a synthetic attribute on
+that parent under the mapped attribute supercategory.
 
 Writes `data/fashionpedia/derived_attributes.json`:
     { parent_item_id: { supercategory: [attr_name, ...] } }
 
-The annotation parser merges this on top of the original COCO attributes.
+Re-runnable: existing entries in the JSON are merged with the new ones.
 """
 from __future__ import annotations
 
@@ -19,14 +20,25 @@ from pathlib import Path
 from typing import Dict, List, Set, Tuple
 
 
-PROMOTE_FROM: Set[str] = {"decorations", "closures"}
-RECIPIENT_EXCLUDE: Set[str] = {"decorations", "closures", "garment parts"}
-CONTAINMENT_THRESHOLD: float = 0.8
-
+# Donor supercategory → target attribute supercategory.
+# Decoration crops (ruffle, bead, ...) become finishing attributes on the parent.
+# Closure crops (zipper, buckle) become opening-type attributes.
+# Accessory crops (watch, tie, belt, ...) become accessories attributes.
 SUPERCAT_TO_ATTR_GROUP: Dict[str, str] = {
-    "decorations": "textile finishing, manufacturing techniques",
-    "closures": "opening type",
+    "decorations":     "textile finishing, manufacturing techniques",
+    "closures":        "opening type",
+    "head":            "accessories",
+    "neck":            "accessories",
+    "arms and hands":  "accessories",
+    "others":          "accessories",
+    "waist":           "accessories",
 }
+
+PROMOTE_FROM: Set[str] = set(SUPERCAT_TO_ATTR_GROUP.keys())
+# Recipients are any annotation NOT in the donor set and not a "garment parts"
+# crop (sleeves/collars/etc., which we drop and which would over-promote).
+RECIPIENT_EXCLUDE: Set[str] = PROMOTE_FROM | {"garment parts"}
+CONTAINMENT_THRESHOLD: float = 0.8
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 FASHIONPEDIA_DIR = PROJECT_ROOT / "data" / "fashionpedia"
@@ -65,17 +77,19 @@ def main() -> None:
         if c["supercategory"] not in RECIPIENT_EXCLUDE
     }
 
-    # Group annotations by image
     by_image: Dict[int, List[dict]] = defaultdict(list)
     for ann in data["annotations"]:
         by_image[ann["image_id"]].append(ann)
 
     derived: Dict[str, Dict[str, Set[str]]] = defaultdict(lambda: defaultdict(set))
+    # Pre-seed from any existing file so reruns are idempotent and additive.
+    if OUTPUT_JSON.exists():
+        for pid, groups in json.loads(OUTPUT_JSON.read_text()).items():
+            for sc, names in groups.items():
+                derived[pid][sc].update(names)
 
-    n_donors = 0
-    n_donors_with_parent = 0
     promoted_by_cat: Counter = Counter()
-    multi_parent_skips = 0
+    orphans_by_cat: Counter = Counter()
 
     for anns in by_image.values():
         donors = [a for a in anns if a["category_id"] in donor_cat_ids]
@@ -84,34 +98,26 @@ def main() -> None:
             continue
 
         for donor in donors:
-            n_donors += 1
-            donor_cat_name = cat_by_id[donor["category_id"]]["name"]
-            donor_super = cat_by_id[donor["category_id"]]["supercategory"]
-            target_group = SUPERCAT_TO_ATTR_GROUP[donor_super]
+            donor_cat = cat_by_id[donor["category_id"]]
+            target_group = SUPERCAT_TO_ATTR_GROUP[donor_cat["supercategory"]]
 
-            # Find candidate parents that contain >= threshold of donor's bbox
             matches: List[Tuple[float, dict]] = []
             for cand in candidates:
                 if cand["id"] == donor["id"]:
                     continue
-                ratio = _containment(donor["bbox"], cand["bbox"])
-                if ratio >= CONTAINMENT_THRESHOLD:
+                if _containment(donor["bbox"], cand["bbox"]) >= CONTAINMENT_THRESHOLD:
                     cand_area = cand["bbox"][2] * cand["bbox"][3]
                     matches.append((cand_area, cand))
 
             if not matches:
+                orphans_by_cat[donor_cat["name"]] += 1
                 continue
 
-            # Pick the smallest-area containing parent (most specific)
+            # Most-specific (smallest) parent wins
             matches.sort(key=lambda x: x[0])
-            parent = matches[0][1]
-            parent_id = str(parent["id"])
-
-            derived[parent_id][target_group].add(_attr_name(donor_cat_name))
-            n_donors_with_parent += 1
-            promoted_by_cat[donor_cat_name] += 1
-            if len(matches) > 1:
-                multi_parent_skips += 1
+            parent_id = str(matches[0][1]["id"])
+            derived[parent_id][target_group].add(_attr_name(donor_cat["name"]))
+            promoted_by_cat[donor_cat["name"]] += 1
 
     out = {
         pid: {group: sorted(names) for group, names in groups.items()}
@@ -121,14 +127,14 @@ def main() -> None:
 
     print(f"Promotion threshold: containment >= {CONTAINMENT_THRESHOLD}")
     print(f"Donor supercategories: {sorted(PROMOTE_FROM)}")
-    print(f"  donors total:               {n_donors}")
-    print(f"  donors with a parent:       {n_donors_with_parent}")
-    print(f"  donors with no parent:      {n_donors - n_donors_with_parent}")
-    print(f"  donors with >1 candidate:   {multi_parent_skips} (picked smallest)")
-    print(f"  parents enriched:           {len(out)}")
+    print(f"Parents enriched (total in JSON): {len(out)}")
+
     print("\nPromoted donors per category:")
-    for name, n in promoted_by_cat.most_common():
-        print(f"  {name:<14} {n}")
+    all_cats = set(promoted_by_cat) | set(orphans_by_cat)
+    rows = [(c, promoted_by_cat[c], promoted_by_cat[c] + orphans_by_cat[c]) for c in all_cats]
+    rows.sort(key=lambda r: -r[1])
+    for name, n, total in rows:
+        print(f"  {name:<40} {n:>5}/{total:<5} ({100*n/total:>4.0f}%)")
     print(f"\nWrote {OUTPUT_JSON}")
 
 

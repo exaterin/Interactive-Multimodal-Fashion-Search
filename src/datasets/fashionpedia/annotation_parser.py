@@ -17,6 +17,7 @@ _MATERIAL_SUPERCATS: frozenset[str] = frozenset(
 _FINISHING_SUPERCATS: frozenset[str] = frozenset(
     {"textile finishing, manufacturing techniques"}
 )
+_ACCESSORIES_SUPERCATS: frozenset[str] = frozenset({"accessories"})
 
 
 def parse_fashionpedia_annotations(
@@ -41,7 +42,7 @@ def parse_fashionpedia_annotations(
 
     If a sibling `derived_attributes.json` is present next to `json_path`, its
     entries are merged on top of the parsed `attribute_map`. See
-    `promote_decorations.py`.
+    `promote_attributes.py`.
     """
     if not json_path.exists():
         raise FileNotFoundError(f"Fashionpedia annotation file not found: {json_path}")
@@ -79,7 +80,7 @@ def parse_fashionpedia_annotations(
             if attr is None:
                 continue
             supercat = attr["supercategory"]
-            if supercat in _PATTERN_SUPERCATS | _SHAPE_SUPERCATS | _MATERIAL_SUPERCATS | _FINISHING_SUPERCATS:
+            if supercat in _PATTERN_SUPERCATS | _SHAPE_SUPERCATS | _MATERIAL_SUPERCATS | _FINISHING_SUPERCATS | _ACCESSORIES_SUPERCATS:
                 attr_groups.setdefault(supercat, set()).add(attr["name"])
 
         attribute_map[item_id] = attr_groups
@@ -138,6 +139,7 @@ def build_filter_values(
     shapes: Set[str] = set()
     materials: Set[str] = set()
     finishings: Set[str] = set()
+    accessories: Set[str] = set()
 
     for supercat_dict in attribute_map.values():
         for supercat, attr_set in supercat_dict.items():
@@ -149,6 +151,8 @@ def build_filter_values(
                 materials.update(attr_set)
             elif supercat in _FINISHING_SUPERCATS:
                 finishings.update(attr_set)
+            elif supercat in _ACCESSORIES_SUPERCATS:
+                accessories.update(attr_set)
 
     colors: Set[str] = set()
     if color_annotations:
@@ -161,5 +165,6 @@ def build_filter_values(
         "shape": sorted(shapes),
         "material": sorted(materials),
         "finishing": sorted(finishings),
+        "accessories": sorted(accessories),
         "color": sorted(colors),
     }
