@@ -1,51 +1,43 @@
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Union
+from typing import List
 
 import numpy as np
-import streamlit as st
-from fashion_clip.fashion_clip import FashionCLIP
-from PIL import Image
+import torch
+from transformers import CLIPModel, CLIPProcessor
 
-
-ImageInput = Union[str, Path, Image.Image]
+from src.models.utils import ImageInput, normalize_rows, to_pil
 
 
 class FashionCLIPEncoder:
     """
-    Wrapper around FashionCLIP for encoding text queries
-    and uploaded/reference images.
+    Wrapper around FashionCLIP for encoding text queries, single images, and
+    image batches into a shared 512-d L2-normalised embedding space.
     """
 
-    def __init__(self, model_name: str = "fashion-clip"):
-        self.model = FashionCLIP(model_name)
-
-    @staticmethod
-    def _normalize(vec: np.ndarray) -> np.ndarray:
-        vec = np.asarray(vec, dtype=np.float32)
-        norm = np.linalg.norm(vec)
-        if norm > 0:
-            vec = vec / norm
-        return vec
+    def __init__(self, model_name: str = "patrickjohncyh/fashion-clip"):
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        # `use_safetensors=False` works around a macOS arm64 SIGBUS that happens
+        # when matmul touches safetensors-mmapped weights from this checkpoint.
+        self.model = CLIPModel.from_pretrained(model_name, use_safetensors=False).to(self.device)
+        self.processor = CLIPProcessor.from_pretrained(model_name)
 
     def encode_text(self, text: str) -> np.ndarray:
-        emb = self.model.encode_text([text], batch_size=512)[0]
-        return self._normalize(emb)
+        inputs = self.processor(text=[text], return_tensors="pt", padding=True).to(self.device)
+        with torch.no_grad():
+            emb = self.model.get_text_features(**inputs).cpu().numpy()
+        return normalize_rows(emb)[0]
 
     def encode_image(self, image: ImageInput) -> np.ndarray:
-        """
-        Accepts:
-        - path string
-        - Path object
-        - PIL image
-        """
-        if isinstance(image, Image.Image):
-            emb = self.model.encode_images([image], batch_size=1)[0]
-        else:
-            emb = self.model.encode_images([str(image)], batch_size=1)[0]
+        return self.encode_images([image])[0]
 
-        return self._normalize(emb)
+    def encode_images(self, images: List[ImageInput]) -> np.ndarray:
+        """Batch-embed images. Returns (N, 512) L2-normalised float32."""
+        pil_images = [to_pil(im) for im in images]
+        inputs = self.processor(images=pil_images, return_tensors="pt", padding=True).to(self.device)
+        with torch.no_grad():
+            embs = self.model.get_image_features(**inputs).cpu().numpy()
+        return normalize_rows(embs)
 
 
 def build_fashion_clip_encoder() -> FashionCLIPEncoder:
