@@ -248,9 +248,8 @@ function ProductCard({
         )}
         {product.attributes && (
           <div className="flex flex-wrap gap-1 mt-1.5">
-            {Object.entries(product.attributes)
-              .slice(0, 2)
-              .flatMap(([, vals]) => vals.slice(0, 1))
+            {Object.values(product.attributes)
+              .flat()
               .map((val) => (
                 <span
                   key={val}

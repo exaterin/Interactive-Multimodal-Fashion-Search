@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
 
-COLOR_SIMILARITY_THRESHOLD: float = 0.3
+COLOR_SIMILARITY_THRESHOLD: float = 0.25
 
 # Attribute supercategories mapped to each filter group
 _PATTERN_SUPERCATS: frozenset[str] = frozenset({"textile pattern", "animal"})
