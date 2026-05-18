@@ -147,7 +147,16 @@ export function useFashionSearch(): UseFashionSearch {
         });
 
         if (response.intent === "reset") {
-          setMessages([]);
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: makeId(),
+              role: "assistant",
+              content:
+                "Got it — starting a fresh search. What are you looking for?",
+              timestamp: new Date(),
+            },
+          ]);
           setProducts([]);
           setVisibleCount(200);
           setSearchState(initialSearchState());

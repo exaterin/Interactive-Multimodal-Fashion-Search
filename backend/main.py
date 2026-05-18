@@ -221,8 +221,11 @@ async def chat(req: ChatRequest) -> ChatResponseSchema:
         chat_history=history,
     )
 
-    # 1a. Reset short-circuit — no retrieval, no responder LLM
-    if composed.reset:
+    # 1a. Reset short-circuit — only when the user wants to wipe state with
+    #     no replacement target. If the composer set reset=true AND produced
+    #     a query, the user is doing "forget that, show me Y" — fall through
+    #     to a fresh retrieval instead of returning empty results.
+    if composed.reset and not composed.query.strip():
         search_state.reset()
         log.state_update("", "", search_state)
         log.turn_end()
@@ -234,8 +237,8 @@ async def chat(req: ChatRequest) -> ChatResponseSchema:
             intent="reset",
         )
 
-    # 1b. Topic switch — wipe state so the responder builds fresh constraints
-    if composed.new_query:
+    # 1b. Topic switch (or reset+target) — wipe state so the responder builds fresh constraints
+    if composed.new_query or composed.reset:
         search_state.reset()
 
     composer_query = composed.query or search_state.current_query or req.message
